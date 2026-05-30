@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.1">
+<meta name="app-version" content="V2-CLUB.2">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -830,7 +830,11 @@
       </button>
     </div>
   </div>
-  <div class="tabs">
+  <!-- Two tab bars sit in the same slot; only one is shown at a time
+       depending on whether we're viewing a trip or a club. Keeping them
+       as separate DOM is simpler than swapping labels on a single bar,
+       and lets each set of icons stay declarative. -->
+  <div class="tabs" id="tabs-trip">
     <button class="tab active" data-tab="settlement">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
       <span>Settlement</span>
@@ -844,10 +848,29 @@
       <span>People</span>
     </button>
   </div>
+  <div class="tabs" id="tabs-club" hidden>
+    <button class="tab active" data-tab="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="tab" data-tab="ledger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      <span>Dues &amp; Expenses</span>
+    </button>
+    <button class="tab" data-tab="members">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Members</span>
+    </button>
+  </div>
   <div class="content">
+    <!-- Trip panes -->
     <div id="tab-settlement" class="tab-pane"></div>
     <div id="tab-expenses" class="tab-pane" hidden></div>
     <div id="tab-people" class="tab-pane" hidden></div>
+    <!-- Club panes -->
+    <div id="tab-dashboard" class="tab-pane" hidden></div>
+    <div id="tab-ledger" class="tab-pane" hidden></div>
+    <div id="tab-members" class="tab-pane" hidden></div>
   </div>
   <button class="fab" id="td-fab" hidden title="Add">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1348,7 +1371,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.1';
+var APP_VERSION = 'V2-CLUB.2';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1955,23 +1978,51 @@ async function openTripInternal(tripId, tab){
   hide('view-trips');
   show('view-trip');
   setTripNameHeader('');
+  // Both tab bars are reset and only the appropriate one is revealed
+  // once get_trip returns and we know the kind. Default to the trip bar
+  // while loading so the header doesn't flicker an unrelated layout.
+  show('tabs-trip');
+  hide('tabs-club');
   state.activeTab = tab || 'settlement';
   state.expandedExpense = null;
   state.expensesLoadedFor = null;
   state.settlementLoadedFor = null;
+  state.clubDashboardLoadedFor = null;
+  state.is_treasurer = false;
   setActiveTab(state.activeTab);
   $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   $('tab-expenses').innerHTML='';
   $('tab-people').innerHTML='';
+  $('tab-dashboard').innerHTML='';
+  $('tab-ledger').innerHTML='';
+  $('tab-members').innerHTML='';
   try{
     var res=await sb.rpc('get_trip',{ p_trip:tripId });
     if(res.error) throw res.error;
     state.trip = res.data;
     setTripNameHeader(state.trip.name);
+    // Now that we know whether this is a club or a trip, switch the tab
+    // bar and the default active tab accordingly. The caller-provided
+    // `tab` wins only if it's valid for this kind.
+    var isClub = (state.trip.kind === 'club');
+    if(isClub){
+      hide('tabs-trip'); show('tabs-club');
+      var validClubTabs = {dashboard:1, ledger:1, members:1};
+      if(!validClubTabs[state.activeTab]) state.activeTab = 'dashboard';
+      // Cache whether the current user is the treasurer — used by
+      // setActiveTab to decide if the FAB should appear.
+      var myDir = state.trip.my_directory_id;
+      state.is_treasurer = (myDir && myDir === state.trip.treasurer_directory_id);
+      $('tab-dashboard').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
+    } else {
+      show('tabs-trip'); hide('tabs-club');
+      var validTripTabs = {settlement:1, expenses:1, people:1};
+      if(!validTripTabs[state.activeTab]) state.activeTab = 'settlement';
+    }
     renderActiveTab();
   }catch(err){
     $('tab-settlement').innerHTML =
-      '<div class="empty"><div class="empty-title">Could not load trip</div>'+
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
       '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
   }
 }
@@ -2224,17 +2275,38 @@ async function lazyCleanupExpiredTrips(){
 
 function setActiveTab(name){
   state.activeTab=name;
+  // Highlight the right tab inside whichever tab bar is currently visible.
   document.querySelectorAll('#view-trip .tab').forEach(function(t){
     t.classList.toggle('active', t.dataset.tab===name);
   });
-  ['settlement','expenses','people'].forEach(function(n){
-    $('tab-'+n).hidden = (n!==name);
-  });
-  // FAB visibility: People (add member) and Expenses (add expense).
-  var fab=$('td-fab');
-  if(!state.trip || state.trip.settled){
-    hide('td-fab'); fab.onclick=null; return;
+  // Hide every pane, then surface the one for `name`. We keep both the
+  // trip set and the club set in the DOM and just toggle visibility.
+  ['settlement','expenses','people','dashboard','ledger','members']
+    .forEach(function(n){
+      var el = $('tab-'+n);
+      if(el) el.hidden = (n !== name);
+    });
+  // FAB visibility differs by view-mode.
+  var fab = $('td-fab');
+  if(!state.trip){ hide('td-fab'); fab.onclick=null; return; }
+  var isClub = (state.trip.kind === 'club');
+  if(isClub){
+    // Phase 1 club FAB: only admin/treasurer can add — Members tab adds
+    // a member, Ledger tab adds an expense or pool-in (we'll wire that
+    // in Step 3). For now, hide the FAB on Dashboard.
+    var canEdit = !!(state.trip.is_admin || state.is_treasurer);
+    if(!canEdit){ hide('td-fab'); fab.onclick=null; return; }
+    if(name === 'members'){
+      show('td-fab'); fab.onclick = openAddClubMember;
+    } else if(name === 'ledger'){
+      show('td-fab'); fab.onclick = openClubLedgerAdd;
+    } else {
+      hide('td-fab'); fab.onclick = null;
+    }
+    return;
   }
+  // Trip mode — original behaviour.
+  if(state.trip.settled){ hide('td-fab'); fab.onclick=null; return; }
   if(name==='people' && state.trip.is_admin){
     show('td-fab'); fab.onclick=openAddPerson;
   }else if(name==='expenses'){
@@ -2245,6 +2317,19 @@ function setActiveTab(name){
 }
 
 function renderActiveTab(){
+  // Club mode dispatches to club renderers; trip mode keeps the old paths.
+  if(state.trip && state.trip.kind === 'club'){
+    if(state.activeTab === 'dashboard'){
+      renderClubDashboardTab();
+    } else if(state.activeTab === 'ledger'){
+      renderClubLedgerTab();
+    } else if(state.activeTab === 'members'){
+      renderClubMembersTab();
+    }
+    setActiveTab(state.activeTab);
+    return;
+  }
+  // Trip mode (unchanged).
   if(state.activeTab==='people'){
     renderPeopleTab();
   }else if(state.activeTab==='expenses'){
@@ -2262,8 +2347,6 @@ function renderActiveTab(){
     // Settlement tab without opening Expenses first.
     if(!state.expensesLoadedFor || state.expensesLoadedFor !== state.trip.trip_id){
       state.expensesLoadedFor = state.trip.trip_id;
-      // Don't await — both fetches run in parallel; loadExpenses will
-      // call renderSettlementTab itself once its data is in.
       loadExpenses();
     }
     if(!state.settlementLoadedFor || state.settlementLoadedFor !== state.trip.trip_id){
@@ -2286,6 +2369,193 @@ function displayName(p){
   var n = ((p.first_name||'') + ' ' + (p.last_name||'')).trim();
   return n || p.email || 'Unnamed';
 }
+// ============================================================
+//  CLUB MODE — Dashboard / Dues & Expenses / Members
+//  Phase 1: Dashboard is fully rendered; Ledger and Members
+//  surfaces are scaffolded as placeholders and filled in later.
+// ============================================================
+
+// Pretty cents formatter for inline copy — reuse the global `money()`
+// helper that already exists for trips. The category labels here keep
+// the Z-report and the activity feed using consistent wording.
+function _clubCategoryLabel(cat){
+  return ({
+    dues:      'Dues',
+    donation:  'Donation',
+    rental:    'Rental income',
+    entry_fee: 'Entry fee'
+  })[cat] || 'Pool in';
+}
+
+// Loads the dashboard payload (a single RPC call) and renders it. Cache
+// keyed by trip id so switching tabs doesn't re-fetch every time.
+async function renderClubDashboardTab(){
+  var t = state.trip;
+  var el = $('tab-dashboard');
+  if(state.clubDashboardLoadedFor !== t.trip_id){
+    el.innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+    try{
+      var res = await sb.rpc('get_club_dashboard', { p_trip: t.trip_id });
+      if(res.error) throw res.error;
+      state.clubDashboard = res.data;
+      state.clubDashboardLoadedFor = t.trip_id;
+    }catch(err){
+      el.innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load dashboard</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+      return;
+    }
+  }
+  _renderClubDashboardFromState();
+}
+function _renderClubDashboardFromState(){
+  var d = state.clubDashboard || {};
+  var t = state.trip;
+  var el = $('tab-dashboard');
+  var canEdit = !!(t.is_admin || state.is_treasurer);
+
+  // --- Top stat row: Pool / This month In / This month Out ----------
+  var topCards =
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);'+
+             'text-transform:uppercase;letter-spacing:0.5px;">Pool</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;">'+ money(d.pool_balance||0) +'</div>'+
+      '</div>'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:#30d158;'+
+             'text-transform:uppercase;letter-spacing:0.5px;">In ' + esc(d.current_period_label||'') + '</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#30d158;">+'+ money(d.month_in||0) +'</div>'+
+      '</div>'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:#ff453a;'+
+             'text-transform:uppercase;letter-spacing:0.5px;">Out</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#ff453a;">-'+ money(d.month_out||0) +'</div>'+
+      '</div>'+
+    '</div>';
+
+  // --- Dues coverage card for the current month ---------------------
+  var duesPaid = Number(d.dues_paid_this_month) || 0;
+  var duesPending = Number(d.dues_pending_this_month) || 0;
+  var coveragePct = (duesPaid + duesPending) > 0
+    ? Math.round(100 * duesPaid / (duesPaid + duesPending)) : 0;
+  var coverageCard =
+    '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;">'+
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;">'+
+        '<div style="font-size:13px;font-weight:700;">Dues for '+esc(d.current_period_label||'')+'</div>'+
+        '<div style="font-size:12px;color:var(--c-text-2);">'+(d.dues_paid_count||0)+' / '+(d.dues_total_count||0)+' paid</div>'+
+      '</div>'+
+      '<div style="height:8px;background:var(--c-bg);border-radius:4px;margin-top:10px;overflow:hidden;">'+
+        '<div style="height:100%;width:'+coveragePct+'%;background:#30d158;transition:width .3s;"></div>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--c-text-2);margin-top:8px;">'+
+        '<span><strong style="color:#30d158;">'+money(duesPaid)+'</strong> collected</span>'+
+        '<span><strong style="color:var(--c-text);">'+money(duesPending)+'</strong> pending</span>'+
+      '</div>'+
+    '</div>';
+
+  // --- "Your status" — current member's own dues for this month -----
+  var myCard = '';
+  if(d.my_dues){
+    var s = d.my_dues.status;
+    var amt = Number(d.my_dues.amount) || 0;
+    var paid = Number(d.my_dues.paid_amount) || 0;
+    var headline, color, sub;
+    if(s === 'paid'){
+      headline = 'Paid'; color = '#30d158';
+      sub = money(amt) + ' for ' + esc(d.current_period_label);
+    } else if(s === 'partial'){
+      headline = 'Partial'; color = '#ff9f0a';
+      sub = money(paid)+' of '+money(amt)+' for '+esc(d.current_period_label);
+    } else {
+      headline = 'Unpaid'; color = '#ff453a';
+      sub = money(amt) + ' due for ' + esc(d.current_period_label);
+    }
+    myCard =
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;">'+
+        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Your status</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">'+
+          '<div>'+
+            '<div style="font-size:16px;font-weight:700;color:'+color+';">'+headline+'</div>'+
+            '<div style="font-size:12px;color:var(--c-text-2);margin-top:2px;">'+sub+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+  // --- Recent activity ---------------------------------------------
+  var recentRows = '';
+  (d.recent || []).forEach(function(ev){
+    var sign, color, lbl;
+    if(ev.kind === 'expense'){
+      sign = '-'; color = '#ff453a';
+      lbl = ev.description || 'Expense';
+    } else if(ev.kind === 'pool_in'){
+      sign = '+'; color = '#30d158';
+      lbl = (ev.description || _clubCategoryLabel(ev.category));
+    } else {
+      // dues_paid
+      sign = '+'; color = '#30d158';
+      lbl = 'Dues paid — ' + (ev.period_label || '');
+    }
+    var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
+      {month:'short', day:'numeric'}) : '';
+    recentRows +=
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
+        '<div style="min-width:0;">'+
+          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
+        '</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+      '</div>';
+  });
+  if(!recentRows){
+    recentRows = '<div style="padding:18px 0;text-align:center;color:var(--c-text-3);font-size:13px;">No activity yet.</div>';
+  }
+  var recentCard =
+    '<div style="background:var(--c-card);border-radius:var(--r);padding:6px 16px 12px;margin-bottom:14px;">'+
+      '<div style="padding:14px 0 4px;font-size:13px;font-weight:700;">Recent activity</div>'+
+      recentRows +
+    '</div>';
+
+  // --- Z-report button (admin/treasurer only) ----------------------
+  var reportBtn = '';
+  if(canEdit){
+    reportBtn =
+      '<button class="btn btn-secondary" id="club-zreport-btn" '+
+        'style="width:100%;margin-top:4px;">Generate Z-Report</button>';
+  }
+
+  el.innerHTML = topCards + coverageCard + myCard + recentCard + reportBtn;
+
+  // Wire Z-report (placeholder for now — Step 5 fills it in).
+  var b = $('club-zreport-btn');
+  if(b){ b.onclick = function(){ toast('Z-Report coming in next step'); }; }
+}
+
+// Placeholder for Dues & Expenses tab — Step 3 will fill this in.
+function renderClubLedgerTab(){
+  var el = $('tab-ledger');
+  el.innerHTML =
+    '<div class="empty">'+
+      '<div class="empty-title">Dues &amp; Expenses</div>'+
+      '<div class="empty-sub">This tab is being built — coming in the next step.</div>'+
+    '</div>';
+}
+// Placeholder for Members tab — Step 4 will fill this in.
+function renderClubMembersTab(){
+  var el = $('tab-members');
+  el.innerHTML =
+    '<div class="empty">'+
+      '<div class="empty-title">Members</div>'+
+      '<div class="empty-sub">This tab is being built — coming in the next step.</div>'+
+    '</div>';
+}
+// FAB handlers — placeholders that will be wired up in the steps below.
+function openAddClubMember(){ toast('Add member coming in next step'); }
+function openClubLedgerAdd(){ toast('Record movement coming in next step'); }
+
+
 function renderPeopleTab(){
   var t=state.trip;
   var el=$('tab-people');
