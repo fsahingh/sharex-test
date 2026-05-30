@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.2">
+<meta name="app-version" content="V2-CLUB.3">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -877,6 +877,76 @@
   </button>
 </div>
 
+<!-- ======================= ADD CLUB MEMBER MODAL ======================
+     Separate from the trip "Add Person" sheet because clubs have
+     additional fields (join month, entry fee handling). Uses the same
+     ap-result/ap-results CSS classes so the styling matches. -->
+<div class="modal" id="modal-add-club-member" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Add Member</div>
+    <div class="modal-body">
+      <label for="acm-search">Search the directory</label>
+      <input type="text" id="acm-search" class="field" placeholder="Type a name or email…" autocomplete="off">
+      <div id="acm-results" class="ap-results" hidden></div>
+      <div id="acm-empty" hidden style="margin-top:8px;padding:12px;
+        background:var(--c-tint-bg);border-radius:var(--r-sm);
+        font-size:13px;color:var(--c-text);line-height:1.45;text-align:center;">
+        <div id="acm-empty-msg" style="margin-bottom:8px;">No matches found.</div>
+        <button type="button" id="acm-empty-add" class="btn btn-primary"
+          style="margin-top:0;font-size:13px;padding:8px 14px;min-height:auto;">
+          Add as a new person
+        </button>
+      </div>
+
+      <!-- New-person form (hidden by default; surfaced via the empty-state
+           banner or by picking the same flow we use for trip add). -->
+      <div id="acm-new-wrap" hidden style="margin-top:14px;">
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label for="acm-first">First name</label>
+            <input type="text" id="acm-first" class="field" maxlength="40">
+          </div>
+          <div style="flex:1;">
+            <label for="acm-last">Last name</label>
+            <input type="text" id="acm-last" class="field" maxlength="40">
+          </div>
+        </div>
+        <label for="acm-email" style="margin-top:14px;">Email (optional)</label>
+        <input type="email" id="acm-email" class="field" placeholder="email@example.com">
+      </div>
+
+      <!-- Club-specific section: when did they join, and how should we
+           handle the entry fee. Always visible — these decisions apply
+           whether the admin picked an existing directory entry or is
+           creating a new one. -->
+      <div style="margin-top:18px;display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="acm-join">Join month</label>
+          <input type="month" id="acm-join" class="field">
+        </div>
+        <div style="flex:1;">
+          <label for="acm-fee">Entry fee ($)</label>
+          <input type="number" id="acm-fee" class="field" min="0" step="0.01">
+        </div>
+      </div>
+      <label class="nt-treasury-row" style="margin-top:14px;">
+        <input type="checkbox" id="acm-fee-paid">
+        <div class="nt-treasury-info">
+          <div class="nt-treasury-title">Mark entry fee as paid now</div>
+          <div class="nt-treasury-sub">When checked, the fee is recorded as a pool inflow immediately. Leave unchecked if you'll collect it later.</div>
+        </div>
+      </label>
+      <div class="msg" id="acm-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="acm-cancel">Cancel</button>
+      <button class="btn btn-primary" id="acm-save">Add</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= ADD PERSON MODAL ======================= -->
 <div class="modal" id="modal-add-person" hidden>
   <div class="modal-backdrop"></div>
@@ -1371,7 +1441,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.2';
+var APP_VERSION = 'V2-CLUB.3';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2542,17 +2612,333 @@ function renderClubLedgerTab(){
       '<div class="empty-sub">This tab is being built — coming in the next step.</div>'+
     '</div>';
 }
-// Placeholder for Members tab — Step 4 will fill this in.
-function renderClubMembersTab(){
+// Members tab for clubs. Mirrors the trip "People" tab but adds:
+//   - active/inactive flag instead of withdrew_at
+//   - current-month dues indicator next to each member
+//   - admin/treasurer badges
+//   - admin actions: set active/inactive, transfer treasurer
+// We fetch the current month's dues via get_club_dues_matrix(months=1)
+// so the indicator stays accurate without a second dedicated RPC.
+async function renderClubMembersTab(){
+  var t = state.trip;
   var el = $('tab-members');
-  el.innerHTML =
-    '<div class="empty">'+
-      '<div class="empty-title">Members</div>'+
-      '<div class="empty-sub">This tab is being built — coming in the next step.</div>'+
+  if(state.clubMembersLoadedFor !== t.trip_id){
+    el.innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+    try{
+      var res = await sb.rpc('get_club_dues_matrix',
+        { p_trip: t.trip_id, p_months: 1 });
+      if(res.error) throw res.error;
+      // Build a map directory_id -> {status, amount, paid_amount, dues_id}
+      // for the most recent (only) period, so the renderer can look up
+      // each member's status in O(1).
+      var period = (res.data.periods && res.data.periods[0])
+        ? res.data.periods[0].period : null;
+      var byDir = {};
+      (res.data.dues || []).forEach(function(r){
+        if(r.period === period) byDir[r.directory_id] = r;
+      });
+      state.clubMembersCurrentPeriod = period;
+      state.clubMembersDuesByDir = byDir;
+      state.clubMembersLoadedFor = t.trip_id;
+    }catch(err){
+      el.innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load members</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+      return;
+    }
+  }
+  _renderClubMembersFromState();
+}
+function _renderClubMembersFromState(){
+  var t = state.trip;
+  var el = $('tab-members');
+  var members = (t.members || []).slice();
+  var dues = state.clubMembersDuesByDir || {};
+  var canAdmin = !!t.is_admin;
+
+  // Sort: active first, inactive last; alphabetical within each group.
+  function byName(a, b){
+    return (displayName(a)||'').toLowerCase().localeCompare(
+           (displayName(b)||'').toLowerCase());
+  }
+  var active = members.filter(function(m){ return !m.is_inactive; }).sort(byName);
+  var inactive = members.filter(function(m){ return m.is_inactive; }).sort(byName);
+
+  // Header: counts + treasurer info.
+  var treasurer = members.filter(function(m){ return m.is_treasurer; })[0];
+  var headerHtml =
+    '<div class="tab-count">'+ members.length +' member'+(members.length===1?'':'s')+
+      (inactive.length ? ', '+inactive.length+' inactive' : '') +'</div>';
+  if(treasurer){
+    headerHtml += '<div style="font-size:12px;color:var(--c-text-2);margin-bottom:12px;">'+
+      '<strong>Treasurer:</strong> '+esc(displayName(treasurer))+
+      (canAdmin ? ' &middot; <a href="#" id="cm-change-treasurer" style="color:var(--c-tint);text-decoration:none;">Change</a>' : '')+
+      '</div>';
+  }
+
+  // Per-member row.
+  function rowHtml(m){
+    var name = displayName(m);
+    var d = dues[m.directory_id];
+    // Dues indicator for the current month.
+    var indicator = '';
+    if(d){
+      if(d.status === 'paid'){
+        indicator = '<span title="Paid this month" style="display:inline-flex;align-items:center;'+
+          'gap:3px;color:#30d158;font-size:11px;font-weight:600;">'+
+          '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Paid</span>';
+      } else if(d.status === 'partial'){
+        indicator = '<span title="Partial payment" style="display:inline-flex;align-items:center;'+
+          'gap:3px;color:#ff9f0a;font-size:11px;font-weight:600;">½ Partial</span>';
+      } else {
+        indicator = '<span title="Unpaid" style="display:inline-flex;align-items:center;'+
+          'gap:3px;color:#ff453a;font-size:11px;font-weight:600;">○ Unpaid</span>';
+      }
+    } else if(!m.is_inactive){
+      // Member is active but the matrix didn't include them — usually
+      // means they joined after the current period. Just say "—".
+      indicator = '<span style="font-size:11px;color:var(--c-text-3);">—</span>';
+    }
+    // Admin / treasurer / inactive badges.
+    var badges = '';
+    if(m.is_admin && !m.is_global_admin){
+      badges += '<span style="font-size:10px;font-weight:700;color:var(--c-tint);'+
+                'background:rgba(10,132,255,0.12);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Admin</span>';
+    }
+    if(m.is_treasurer){
+      badges += '<span style="font-size:10px;font-weight:700;color:#7c5cff;'+
+                'background:rgba(124,92,255,0.12);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Treasurer</span>';
+    }
+    if(m.is_inactive){
+      badges += '<span style="font-size:10px;font-weight:700;color:var(--c-text-3);'+
+                'background:var(--c-bg);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Inactive</span>';
+    }
+    // Admin action menu (kebab) — set active/inactive.
+    var menuBtn = '';
+    if(canAdmin && !m.is_me){
+      menuBtn = '<button class="icon-btn-sm" data-cm-menu="'+m.directory_id+'" '+
+        'title="Member actions" style="margin-left:6px;">'+
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>'+
+        '</button>';
+    }
+    return '<div class="person-row" style="display:flex;align-items:center;gap:12px;'+
+      'padding:12px 14px;background:var(--c-card);border-radius:var(--r);margin-bottom:8px;">'+
+      '<div class="person-avatar" '+(m.is_inactive ? 'style="opacity:0.5;"' : '')+'>'+esc(initials(m))+'</div>'+
+      '<div style="flex:1;min-width:0;'+(m.is_inactive ? 'opacity:0.6;' : '')+'">'+
+        '<div style="font-size:14px;font-weight:600;display:flex;align-items:center;flex-wrap:wrap;">'+
+          esc(name)+ badges +
+        '</div>'+
+        (m.email ? '<div style="font-size:11px;color:var(--c-text-2);margin-top:2px;">'+esc(m.email)+'</div>' : '')+
+      '</div>'+
+      '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">'+
+        indicator + menuBtn +
+      '</div>'+
     '</div>';
+  }
+
+  var html = headerHtml;
+  active.forEach(function(m){ html += rowHtml(m); });
+  if(inactive.length){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+            'text-transform:uppercase;letter-spacing:0.6px;margin:18px 4px 8px;">Inactive</div>';
+    inactive.forEach(function(m){ html += rowHtml(m); });
+  }
+  el.innerHTML = html;
+
+  // Wire treasurer change (re-uses the existing trip treasurer modal).
+  var changeBtn = $('cm-change-treasurer');
+  if(changeBtn){
+    changeBtn.onclick = function(ev){
+      ev.preventDefault();
+      if(typeof openTreasurerModal === 'function') openTreasurerModal();
+      else toast('Treasurer change not available');
+    };
+  }
+  // Wire kebab menus.
+  el.querySelectorAll('[data-cm-menu]').forEach(function(btn){
+    btn.onclick = function(ev){
+      ev.stopPropagation();
+      var dirId = btn.dataset.cmMenu;
+      var m = (state.trip.members||[]).filter(function(x){ return x.directory_id===dirId; })[0];
+      if(!m) return;
+      openClubMemberActions(m);
+    };
+  });
+}
+
+// Small bottom-sheet of actions for a single member. Phase 1: just
+// set active / set inactive. More actions (edit, remove) will come later.
+async function openClubMemberActions(m){
+  var actions = [];
+  if(m.is_inactive){
+    actions.push({label:'Set as active', value:'activate'});
+  } else {
+    actions.push({label:'Set as inactive', value:'deactivate', danger:false});
+  }
+  // Use the existing alertModal with a "choose" pattern: stack buttons.
+  // Simple confirm-style flow keeps the UX consistent with the rest of
+  // the app without introducing a new sheet just yet.
+  var label = m.is_inactive
+    ? 'Make ' + displayName(m) + ' an active member again?'
+    : 'Mark ' + displayName(m) + ' as inactive? They will stop appearing in new monthly dues.';
+  var ok = await alertModal(label, { confirm:true,
+    confirmLabel: m.is_inactive ? 'Set active' : 'Set inactive' });
+  if(!ok) return;
+  try{
+    var res = await sb.rpc('set_member_active', {
+      p_trip: state.trip.trip_id,
+      p_dir:  m.directory_id,
+      p_is_active: !!m.is_inactive   // flip the flag
+    });
+    if(res.error) throw res.error;
+    toast(m.is_inactive ? 'Member set active' : 'Member set inactive');
+    // Refresh trip + members tab.
+    state.clubMembersLoadedFor = null;
+    state.clubDashboardLoadedFor = null;
+    var r = await sb.rpc('get_trip', { p_trip: state.trip.trip_id });
+    if(!r.error) state.trip = r.data;
+    renderClubMembersTab();
+  }catch(err){
+    toast(err.message || 'Could not update member', true);
+  }
 }
 // FAB handlers — placeholders that will be wired up in the steps below.
-function openAddClubMember(){ toast('Add member coming in next step'); }
+// Opens the Add Member modal for clubs. It's a separate modal from
+// the trip "Add Person" sheet so the club-only fields (join month,
+// entry-fee handling) stay self-contained.
+function openAddClubMember(){
+  var t = state.trip;
+  // Pre-fill the entry fee default from the club's configured amount.
+  $('acm-search').value = '';
+  $('acm-first').value  = '';
+  $('acm-last').value   = '';
+  $('acm-email').value  = '';
+  // Default the join month to the current month.
+  var d = new Date();
+  $('acm-join').value =
+    d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  $('acm-fee').value = (t.entry_fee_amount != null) ? t.entry_fee_amount : '';
+  // Default entry-fee status: "Mark paid now" off (admin will collect later).
+  $('acm-fee-paid').checked = false;
+  $('acm-msg').className = 'msg';
+  // Collapse search-results + new-person sections by default (search-first UX).
+  hide('acm-results');
+  hide('acm-empty');
+  hide('acm-new-wrap');
+  delete $('acm-results').dataset.pickedDir;
+  openModal('modal-add-club-member');
+  setTimeout(function(){ $('acm-search').focus(); }, 150);
+}
+
+// Live search in the directory (re-uses search_directory RPC, same as
+// the trip add-person flow). Excludes anyone already in the club.
+var acmSearchTimer = null;
+async function _acmRunSearch(q){
+  if(!q || q.length < 1){
+    hide('acm-results'); hide('acm-empty'); return;
+  }
+  try{
+    var res = await sb.rpc('search_directory',
+      { p_query: q, p_exclude_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var rows = res.data || [];
+    if(rows.length === 0){
+      hide('acm-results');
+      $('acm-empty-msg').textContent = 'No matches for "'+q+'".';
+      show('acm-empty');
+      return;
+    }
+    hide('acm-empty');
+    var h = '';
+    rows.forEach(function(r){
+      var nm = ((r.first_name||'')+' '+(r.last_name||'')).trim()||(r.email||'');
+      h += '<div class="ap-result" data-dir="'+r.directory_id+
+        '" data-first="'+esc(r.first_name||'')+
+        '" data-last="'+esc(r.last_name||'')+
+        '" data-email="'+esc(r.email||'')+'">'+
+        '<div class="person-avatar" style="width:30px;height:30px;font-size:12px;">'+
+        esc(initials(r))+'</div>'+
+        '<div class="ap-result-main">'+
+          '<div class="ap-result-name">'+esc(nm)+'</div>'+
+          (r.email ? '<div class="ap-result-email">'+esc(r.email)+'</div>' : '')+
+        '</div></div>';
+    });
+    $('acm-results').innerHTML = h;
+    show('acm-results');
+  }catch(err){
+    hide('acm-results'); hide('acm-empty');
+  }
+}
+
+// Submit handler. Uses add_member_to_club which mirrors add_person_to_trip
+// but also stamps joined_month and optionally records the entry fee.
+async function saveAddClubMember(){
+  var dirId = $('acm-results').dataset.pickedDir || null;
+  var first = $('acm-first').value.trim();
+  var last  = $('acm-last').value.trim();
+  var email = $('acm-email').value.trim().toLowerCase();
+  var join  = $('acm-join').value;            // "YYYY-MM"
+  var fee   = parseFloat($('acm-fee').value);
+  var feePaid = $('acm-fee-paid').checked;
+  function setMsg(t){ $('acm-msg').className='msg show err'; $('acm-msg').textContent=t; }
+  if(!dirId && !first && !email){
+    setMsg('Pick someone from the directory or fill in the new-person form.');
+    return;
+  }
+  if(!join){ setMsg('Please pick a join month.'); return; }
+  var joinDate = join + '-01';
+  // Allow blank fee → null (use club default in backend if any).
+  var feeParam = isNaN(fee) ? null : fee;
+
+  var btn = $('acm-save');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  // Two-pass submit for the DUPLICATE_NAME path (same as trip flow).
+  var allowDup = false;
+  while(true){
+    try{
+      var res = await sb.rpc('add_member_to_club', {
+        p_trip: state.trip.trip_id,
+        p_directory_id: dirId,
+        p_email: email || null,
+        p_first_name: first || null,
+        p_last_name: last || null,
+        p_join_month: joinDate,
+        p_entry_fee_paid: feePaid,
+        p_entry_fee_amount: feeParam,
+        p_allow_name_duplicate: allowDup
+      });
+      if(res.error) throw res.error;
+      closeModal('modal-add-club-member');
+      toast('Member added');
+      // Refresh the club view (trip data + members tab + dashboard).
+      state.clubMembersLoadedFor = null;
+      state.clubDashboardLoadedFor = null;
+      var r = await sb.rpc('get_trip', { p_trip: state.trip.trip_id });
+      if(!r.error) state.trip = r.data;
+      renderActiveTab();
+      btn.disabled = false; btn.textContent = 'Add';
+      return;
+    }catch(err){
+      var msg = err.message || '';
+      if(!allowDup && msg.indexOf('DUPLICATE_NAME:') === 0){
+        var existing = msg.substring('DUPLICATE_NAME:'.length).trim();
+        var go = await alertModal(
+          'There is already a "'+existing+'" in the directory. '+
+          'Add as a separate person?',
+          { confirm:true, confirmLabel:'Add as new' });
+        if(go){ allowDup = true; continue; }
+        btn.disabled = false; btn.textContent = 'Add';
+        return;
+      }
+      setMsg(msg || 'Could not add member.');
+      btn.disabled = false; btn.textContent = 'Add';
+      return;
+    }
+  }
+}
 function openClubLedgerAdd(){ toast('Record movement coming in next step'); }
 
 
@@ -5819,6 +6205,48 @@ $('ch-pick-club').onclick = function(){
 };
 $('nc-cancel').onclick = function(){ closeModal('modal-new-club'); };
 $('nc-create').onclick = createClub;
+
+// Add-club-member modal wiring.
+$('acm-cancel').onclick = function(){ closeModal('modal-add-club-member'); };
+$('acm-save').onclick = saveAddClubMember;
+$('acm-search').addEventListener('input', function(){
+  $('acm-results').dataset.pickedDir = '';
+  $('acm-first').value=''; $('acm-last').value=''; $('acm-email').value='';
+  hide('acm-new-wrap');
+  var q = $('acm-search').value.trim();
+  clearTimeout(acmSearchTimer);
+  acmSearchTimer = setTimeout(function(){ _acmRunSearch(q); }, 220);
+});
+$('acm-results').addEventListener('click', function(ev){
+  var r = ev.target.closest('[data-dir]');
+  if(!r) return;
+  $('acm-results').dataset.pickedDir = r.dataset.dir;
+  var nm = ((r.dataset.first||'')+' '+(r.dataset.last||'')).trim() || r.dataset.email || '';
+  $('acm-search').value = nm;
+  hide('acm-results');
+  hide('acm-empty');
+  hide('acm-new-wrap');
+  $('acm-first').value=''; $('acm-last').value=''; $('acm-email').value='';
+});
+// Empty-state "Add as new" button: open the new-person form, pre-fill
+// from the search query, and clear the picked-from-results state.
+$('acm-empty-add').onclick = function(){
+  var q = $('acm-search').value.trim();
+  var parts = (typeof splitQueryToName === 'function')
+    ? splitQueryToName(q) : { first:q, last:'' };
+  if(parts.email){ $('acm-email').value = parts.email; }
+  else { $('acm-first').value = parts.first || ''; $('acm-last').value = parts.last || ''; }
+  $('acm-results').dataset.pickedDir = '';
+  show('acm-new-wrap');
+  hide('acm-empty');
+  setTimeout(function(){ $('acm-first').focus(); }, 80);
+};
+// Clear the directory pick if the new-person fields are edited.
+['acm-first','acm-last','acm-email'].forEach(function(id){
+  $(id).addEventListener('input', function(){
+    $('acm-results').dataset.pickedDir = '';
+  });
+});
 $('nt-name').addEventListener('keydown',function(e){
   if(e.key==='Enter') createTrip();
 });
@@ -5845,7 +6273,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
