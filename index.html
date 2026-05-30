@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.3">
+<meta name="app-version" content="V2-CLUB.5">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -877,6 +877,46 @@
   </button>
 </div>
 
+<!-- ======================= MARK DUES MODAL =========================== -->
+<div class="modal" id="modal-mark-dues" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Record dues payment</div>
+    <div class="modal-body">
+      <div style="font-size:15px;font-weight:700;" id="md-title">Member</div>
+      <div style="font-size:12px;color:var(--c-text-2);margin-top:2px;" id="md-period">Month</div>
+      <div style="font-size:12px;color:var(--c-text-3);margin-top:2px;" id="md-due">Due: $0.00</div>
+      <label for="md-amount" style="margin-top:18px;">Amount received ($)</label>
+      <input type="number" id="md-amount" class="field" min="0" step="0.01">
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">
+        Enter the full amount due to mark as paid, or a smaller value for a partial payment.
+      </div>
+      <label for="md-notes" style="margin-top:14px;">Notes (optional)</label>
+      <input type="text" id="md-notes" class="field" placeholder="e.g. Cash, Venmo, etc." maxlength="200">
+      <div class="msg" id="md-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="md-cancel">Cancel</button>
+      <button class="btn btn-danger" id="md-unpaid" hidden>Mark unpaid</button>
+      <button class="btn btn-primary" id="md-save">Mark paid</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= DUES MATRIX MODAL ========================= -->
+<div class="modal" id="modal-dues-matrix" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:85vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Dues matrix</div>
+    <div class="modal-body" id="dm-body" style="overflow-x:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="dm-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= ADD CLUB MEMBER MODAL ======================
      Separate from the trip "Add Person" sheet because clubs have
      additional fields (join month, entry fee handling). Uses the same
@@ -1441,7 +1481,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.3';
+var APP_VERSION = 'V2-CLUB.5';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2603,13 +2643,382 @@ function _renderClubDashboardFromState(){
   if(b){ b.onclick = function(){ toast('Z-Report coming in next step'); }; }
 }
 
-// Placeholder for Dues & Expenses tab — Step 3 will fill this in.
-function renderClubLedgerTab(){
+// Dues & Expenses tab for clubs. Shows a single unified feed of money
+// movements: expenses (out), pool inflows (donations/rentals/entry_fee),
+// and dues (paid or pending). A filter chip row lets the admin narrow
+// the view by category. Tapping a dues row opens the mark-paid flow.
+//
+// We fetch the data in two parallel calls:
+//   - the existing expenses list (kind='expense' or 'prepayment')
+//   - the club_dues matrix (limited to the most recent 12 months)
+// Then we merge them client-side into a single time-sorted list.
+async function renderClubLedgerTab(){
+  var t = state.trip;
   var el = $('tab-ledger');
-  el.innerHTML =
-    '<div class="empty">'+
-      '<div class="empty-title">Dues &amp; Expenses</div>'+
-      '<div class="empty-sub">This tab is being built — coming in the next step.</div>'+
+  if(state.clubLedgerLoadedFor !== t.trip_id){
+    el.innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+    try{
+      var pair = await Promise.all([
+        sb.from('expenses').select('id, kind, description, amount, paid_by, paid_to, category, added_at')
+          .eq('trip_id', t.trip_id)
+          .order('added_at', { ascending: false }),
+        sb.rpc('get_club_dues_matrix', { p_trip: t.trip_id, p_months: 12 })
+      ]);
+      if(pair[0].error) throw pair[0].error;
+      if(pair[1].error) throw pair[1].error;
+      state.clubLedgerExpenses = pair[0].data || [];
+      state.clubLedgerMatrix   = pair[1].data || {};
+      state.clubLedgerLoadedFor = t.trip_id;
+      state.clubLedgerFilter = state.clubLedgerFilter || 'all';
+    }catch(err){
+      el.innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load ledger</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+      return;
+    }
+  }
+  _renderClubLedgerFromState();
+}
+
+// Render helper: builds the chip row + the unified event list using
+// whatever's currently in state.clubLedgerExpenses / clubLedgerMatrix.
+function _renderClubLedgerFromState(){
+  var t = state.trip;
+  var el = $('tab-ledger');
+  var canEdit = !!(t.is_admin || state.is_treasurer);
+
+  // Build a name lookup from the members already in state.trip.
+  var nameOf = {};
+  (t.members || []).forEach(function(m){ nameOf[m.directory_id] = displayName(m); });
+
+  // ---- Build the unified event list. -------------------------------
+  // Three sources:
+  //   1. Expenses (kind='expense')                        → "out"
+  //   2. Prepayments (kind='prepayment', has category)    → "in"
+  //   3. Dues rows (paid OR unpaid)                       → "dues"
+  // Each item is a flat object we can sort by date and filter by chip.
+  var events = [];
+  (state.clubLedgerExpenses || []).forEach(function(e){
+    events.push({
+      kind: (e.kind === 'prepayment') ? 'pool_in' : 'expense',
+      category: e.category || ((e.kind === 'prepayment') ? 'donation' : null),
+      description: e.description || '',
+      amount: Number(e.amount) || 0,
+      actor: nameOf[e.paid_by] || '—',
+      at: e.added_at,
+      id: e.id,
+      _date: e.added_at
+    });
+  });
+  (state.clubLedgerMatrix && state.clubLedgerMatrix.dues || []).forEach(function(d){
+    events.push({
+      kind: 'dues',
+      category: 'dues',
+      description: 'Monthly dues',
+      amount: Number(d.amount) || 0,
+      paid_amount: Number(d.paid_amount) || 0,
+      status: d.status,
+      actor: nameOf[d.directory_id] || '—',
+      period: d.period,
+      dues_id: d.dues_id,
+      directory_id: d.directory_id,
+      // Sort dues by their period (status changes don't move them in the
+      // timeline; the row represents the month it's for, not the moment
+      // someone marked it).
+      _date: d.period + 'T00:00:00Z'
+    });
+  });
+  // Sort newest first.
+  events.sort(function(a, b){
+    return (a._date < b._date) ? 1 : (a._date > b._date) ? -1 : 0;
+  });
+
+  // ---- Filter chips. -----------------------------------------------
+  // Counts are computed on the full set so the user sees how much each
+  // filter would surface; clicking a chip narrows the displayed feed.
+  var counts = {
+    all: events.length, dues: 0, expense: 0,
+    donation: 0, rental: 0, entry_fee: 0
+  };
+  events.forEach(function(ev){
+    if(ev.kind === 'dues') counts.dues++;
+    else if(ev.kind === 'expense') counts.expense++;
+    else if(ev.kind === 'pool_in'){
+      if(counts[ev.category] != null) counts[ev.category]++;
+    }
+  });
+  var filter = state.clubLedgerFilter || 'all';
+  function chip(key, label){
+    var active = (filter === key);
+    return '<button class="ledger-chip" data-filter="'+key+'" '+
+      'style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;'+
+      'border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;'+
+      'border:1px solid '+ (active ? 'var(--c-tint)' : 'var(--c-border)')+';'+
+      'background:'+ (active ? 'var(--c-tint)' : 'var(--c-card)')+';'+
+      'color:'+ (active ? '#fff' : 'var(--c-text)')+';">'+
+      esc(label) + '<span style="opacity:0.7;">'+counts[key]+'</span></button>';
+  }
+  var chipRow = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">'+
+    chip('all',       'All')+
+    chip('dues',      'Dues')+
+    chip('expense',   'Expenses')+
+    chip('donation',  'Donations')+
+    chip('rental',    'Rentals')+
+    chip('entry_fee', 'Entry fees')+
+    '</div>';
+
+  // ---- Optional "View dues matrix" button (admin/treasurer + always). --
+  var matrixBtn = '<button id="ledger-matrix-btn" class="btn btn-secondary" '+
+    'style="width:100%;margin:0 0 12px;font-size:13px;padding:9px;'+
+    'min-height:auto;">View dues matrix</button>';
+
+  // ---- Apply filter. -----------------------------------------------
+  var filtered = events.filter(function(ev){
+    if(filter === 'all') return true;
+    if(filter === 'dues') return ev.kind === 'dues';
+    if(filter === 'expense') return ev.kind === 'expense';
+    return ev.kind === 'pool_in' && ev.category === filter;
+  });
+
+  // ---- Render the list. --------------------------------------------
+  var rowsHtml = '';
+  if(filtered.length === 0){
+    rowsHtml =
+      '<div class="empty"><div class="empty-title">Nothing yet</div>'+
+        '<div class="empty-sub">No '+(filter==='all'?'movements':filter)+' to show.</div>'+
+      '</div>';
+  } else {
+    filtered.forEach(function(ev){
+      rowsHtml += _renderLedgerRow(ev, canEdit);
+    });
+  }
+
+  el.innerHTML = chipRow + matrixBtn + rowsHtml;
+
+  // ---- Wire chips. -------------------------------------------------
+  el.querySelectorAll('.ledger-chip').forEach(function(c){
+    c.onclick = function(){
+      state.clubLedgerFilter = c.dataset.filter;
+      _renderClubLedgerFromState();
+    };
+  });
+  // ---- Wire matrix button. -----------------------------------------
+  $('ledger-matrix-btn').onclick = openClubDuesMatrix;
+  // ---- Wire dues-row clicks (mark paid / unpaid). ------------------
+  el.querySelectorAll('[data-dues-id]').forEach(function(row){
+    row.onclick = function(){
+      var duesId = row.dataset.duesId;
+      var ev = filtered.filter(function(x){ return x.dues_id === duesId; })[0];
+      if(ev) openMarkDuesModal(ev);
+    };
+  });
+}
+
+// Render a single ledger row. The visual treatment differs by kind:
+// expenses are red (out), pool-ins green (in), dues either green/orange/red
+// depending on status. Dues rows are tappable; the others are inert.
+function _renderLedgerRow(ev, canEdit){
+  var sign, color, lbl, sub;
+  if(ev.kind === 'expense'){
+    sign = '-'; color = '#ff453a';
+    lbl = ev.description || 'Expense';
+    sub = ev.actor || '';
+  } else if(ev.kind === 'pool_in'){
+    sign = '+'; color = '#30d158';
+    lbl = ev.description || _clubCategoryLabel(ev.category);
+    sub = ev.actor || '';
+  } else {
+    // Dues row — colour depends on status.
+    var s = ev.status;
+    if(s === 'paid'){ sign = '+'; color = '#30d158'; }
+    else if(s === 'partial'){ sign = '+'; color = '#ff9f0a'; }
+    else { sign = '·'; color = 'var(--c-text-3)'; }
+    var periodLbl = ev.period
+      ? (new Date(ev.period + 'T00:00:00Z')).toLocaleString(undefined,
+          {month:'short', year:'numeric', timeZone:'UTC'})
+      : '';
+    lbl = 'Dues — ' + (ev.actor || '') + ' — ' + periodLbl;
+    if(s === 'paid'){ sub = 'Paid &middot; '+money(ev.paid_amount||ev.amount); }
+    else if(s === 'partial'){ sub = 'Partial &middot; '+money(ev.paid_amount)+' of '+money(ev.amount); }
+    else { sub = 'Unpaid &middot; '+money(ev.amount); }
+  }
+  var when = '';
+  if(ev.kind !== 'dues' && ev.at){
+    when = new Date(ev.at).toLocaleDateString(undefined,
+      {month:'short', day:'numeric'});
+  }
+  // Tappable wrapper for dues, plain div for others. canEdit controls
+  // whether the dues row even responds to taps — non-admins still see
+  // the row, just can't open the mark-paid sheet.
+  var openTag, closeTag, extraAttrs = '';
+  if(ev.kind === 'dues' && canEdit){
+    openTag = '<button';
+    closeTag = '</button>';
+    extraAttrs = ' data-dues-id="'+esc(ev.dues_id)+'" style="all:unset;display:block;width:100%;cursor:pointer;"';
+  } else {
+    openTag = '<div';
+    closeTag = '</div>';
+  }
+  return openTag + extraAttrs + '>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;'+
+      'padding:12px 14px;background:var(--c-card);border-radius:var(--r);margin-bottom:8px;text-align:left;">'+
+      '<div style="min-width:0;flex:1;">'+
+        '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+        '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+sub+(when?' &middot; '+when:'')+'</div>'+
+      '</div>'+
+      '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+    '</div>'+
+  closeTag;
+}
+
+// Bottom-sheet to mark a dues row as paid (full or partial) or undo it.
+async function openMarkDuesModal(ev){
+  // Pre-fill the input with the full amount so a single tap on "Mark
+  // paid" is the common case; the user can edit for a partial amount.
+  $('md-title').textContent = (ev.actor || 'Member');
+  var periodLbl = ev.period
+    ? (new Date(ev.period + 'T00:00:00Z')).toLocaleString(undefined,
+        {month:'long', year:'numeric', timeZone:'UTC'})
+    : '';
+  $('md-period').textContent = periodLbl;
+  $('md-due').textContent = 'Due: ' + money(ev.amount || 0);
+  $('md-amount').value = (ev.status === 'paid' || ev.status === 'partial')
+    ? (ev.paid_amount || ev.amount)
+    : (ev.amount || 0);
+  $('md-notes').value = '';
+  $('md-msg').className = 'msg';
+  state.markDuesId = ev.dues_id;
+  state.markDuesCurrentStatus = ev.status;
+  // "Mark unpaid" button only visible if the row is already paid/partial.
+  $('md-unpaid').hidden = !(ev.status === 'paid' || ev.status === 'partial');
+  openModal('modal-mark-dues');
+  setTimeout(function(){ $('md-amount').focus(); $('md-amount').select(); }, 150);
+}
+
+async function submitMarkDuesPaid(){
+  var amt = parseFloat($('md-amount').value);
+  var notes = $('md-notes').value.trim() || null;
+  function setMsg(t){ $('md-msg').className='msg show err'; $('md-msg').textContent=t; }
+  if(!(amt > 0)){ setMsg('Enter an amount greater than zero.'); return; }
+  var btn = $('md-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('mark_dues_paid', {
+      p_dues_id: state.markDuesId,
+      p_paid_amount: amt,
+      p_notes: notes
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-mark-dues');
+    toast('Dues marked paid');
+    // Invalidate caches so the dashboard, ledger, and members tab all
+    // pick up the new status on next render.
+    state.clubLedgerLoadedFor = null;
+    state.clubMembersLoadedFor = null;
+    state.clubDashboardLoadedFor = null;
+    renderActiveTab();
+  }catch(err){
+    setMsg(err.message || 'Could not save.');
+  }
+  btn.disabled = false; btn.textContent = 'Mark paid';
+}
+
+async function submitMarkDuesUnpaid(){
+  if(!await alertModal('Mark this dues row as unpaid? Any recorded payment will be cleared.',
+    { confirm:true, danger:true, confirmLabel:'Mark unpaid' })) return;
+  try{
+    var res = await sb.rpc('mark_dues_unpaid', { p_dues_id: state.markDuesId });
+    if(res.error) throw res.error;
+    closeModal('modal-mark-dues');
+    toast('Dues marked unpaid');
+    state.clubLedgerLoadedFor = null;
+    state.clubMembersLoadedFor = null;
+    state.clubDashboardLoadedFor = null;
+    renderActiveTab();
+  }catch(err){
+    toast(err.message || 'Could not save.', true);
+  }
+}
+
+// ---- Dues matrix modal -----------------------------------------------
+// A read-only grid: rows = members, columns = months. Each cell shows
+// a coloured marker for the dues status that month. The matrix already
+// lives in state.clubLedgerMatrix from the ledger fetch above, so we
+// don't re-fetch unless the user opens the modal from elsewhere.
+async function openClubDuesMatrix(){
+  openModal('modal-dues-matrix');
+  $('dm-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  var m = state.clubLedgerMatrix;
+  if(!m || !m.periods){
+    try{
+      var res = await sb.rpc('get_club_dues_matrix',
+        { p_trip: state.trip.trip_id, p_months: 12 });
+      if(res.error) throw res.error;
+      m = res.data;
+      state.clubLedgerMatrix = m;
+    }catch(err){
+      $('dm-body').innerHTML =
+        '<div class="empty"><div class="empty-title">Could not load</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+      return;
+    }
+  }
+  // Build a lookup: byDir[dir][period] -> dues row.
+  var byDir = {};
+  (m.dues || []).forEach(function(d){
+    if(!byDir[d.directory_id]) byDir[d.directory_id] = {};
+    byDir[d.directory_id][d.period] = d;
+  });
+  // Header row of months. Newest on the right (UI convention for a
+  // ledger), so we leave the matrix order as-is (oldest → newest).
+  var periods = m.periods || [];
+  var headerCells = '<th style="position:sticky;left:0;background:var(--c-surface);'+
+    'text-align:left;padding:8px 10px;font-size:11px;font-weight:600;'+
+    'color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.4px;">Member</th>';
+  periods.forEach(function(p){
+    headerCells += '<th style="padding:8px 6px;font-size:10px;font-weight:600;'+
+      'color:var(--c-text-3);text-align:center;white-space:nowrap;">'+esc(p.label)+'</th>';
+  });
+  var rowsHtml = '';
+  (m.members || []).forEach(function(mem){
+    var name = mem.display_name || 'Member';
+    var inactive = mem.is_inactive;
+    rowsHtml += '<tr>'+
+      '<td style="position:sticky;left:0;background:var(--c-card);'+
+        'padding:10px;font-size:13px;color:var(--c-text);'+
+        (inactive?'opacity:0.55;':'')+'border-bottom:1px solid var(--c-border);">'+
+        esc(name) +
+        (inactive ? ' <span style="font-size:10px;color:var(--c-text-3);">(inactive)</span>' : '') +
+      '</td>';
+    periods.forEach(function(p){
+      var d = (byDir[mem.directory_id]||{})[p.period];
+      var icon = '<span style="color:var(--c-text-3);">—</span>';
+      if(d){
+        if(d.status === 'paid'){
+          icon = '<span title="Paid" style="color:#30d158;font-weight:700;">✓</span>';
+        } else if(d.status === 'partial'){
+          icon = '<span title="Partial" style="color:#ff9f0a;font-weight:700;">½</span>';
+        } else {
+          icon = '<span title="Unpaid" style="color:#ff453a;font-weight:700;">○</span>';
+        }
+      }
+      rowsHtml += '<td style="text-align:center;padding:10px 6px;font-size:14px;'+
+        'border-bottom:1px solid var(--c-border);">'+icon+'</td>';
+    });
+    rowsHtml += '</tr>';
+  });
+  $('dm-body').innerHTML =
+    '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">'+
+      '<table style="width:100%;border-collapse:collapse;">'+
+        '<thead><tr>'+headerCells+'</tr></thead>'+
+        '<tbody>'+rowsHtml+'</tbody>'+
+      '</table>'+
+    '</div>'+
+    '<div style="font-size:11px;color:var(--c-text-3);margin-top:14px;line-height:1.5;text-align:center;">'+
+      '<strong style="color:#30d158;">✓</strong> Paid &middot; '+
+      '<strong style="color:#ff9f0a;">½</strong> Partial &middot; '+
+      '<strong style="color:#ff453a;">○</strong> Unpaid &middot; '+
+      '— Not a member yet'+
     '</div>';
 }
 // Members tab for clubs. Mirrors the trip "People" tab but adds:
@@ -2699,9 +3108,13 @@ function _renderClubMembersFromState(){
       // means they joined after the current period. Just say "—".
       indicator = '<span style="font-size:11px;color:var(--c-text-3);">—</span>';
     }
-    // Admin / treasurer / inactive badges.
+    // Admin / treasurer / inactive badges. In the club view we surface
+    // the Admin badge even for the global admin — viewers want to see
+    // who can change settings, regardless of how that authority was
+    // granted. (The trip People tab still hides it for global admins
+    // to avoid noise on every trip; clubs are run by a smaller cast.)
     var badges = '';
-    if(m.is_admin && !m.is_global_admin){
+    if(m.is_admin || m.is_global_admin){
       badges += '<span style="font-size:10px;font-weight:700;color:var(--c-tint);'+
                 'background:rgba(10,132,255,0.12);padding:2px 6px;border-radius:6px;'+
                 'margin-left:6px;">Admin</span>';
@@ -6209,6 +6622,12 @@ $('nc-create').onclick = createClub;
 // Add-club-member modal wiring.
 $('acm-cancel').onclick = function(){ closeModal('modal-add-club-member'); };
 $('acm-save').onclick = saveAddClubMember;
+// Mark-dues modal.
+$('md-cancel').onclick = function(){ closeModal('modal-mark-dues'); };
+$('md-save').onclick   = submitMarkDuesPaid;
+$('md-unpaid').onclick = submitMarkDuesUnpaid;
+// Dues matrix modal close.
+$('dm-close').onclick  = function(){ closeModal('modal-dues-matrix'); };
 $('acm-search').addEventListener('input', function(){
   $('acm-results').dataset.pickedDir = '';
   $('acm-first').value=''; $('acm-last').value=''; $('acm-email').value='';
@@ -6273,7 +6692,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
