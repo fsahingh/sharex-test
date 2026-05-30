@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-8.0">
+<meta name="app-version" content="V2-CLUB.1">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1214,6 +1214,89 @@
   </div>
 </div>
 
+<!-- ======================= NEW-TRIP / NEW-CLUB CHOOSER =================
+     Shown only to the global admin when they tap the trips-screen "+"
+     button. Non-admins skip this and go directly to the New Trip modal. -->
+<div class="modal" id="modal-new-chooser" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Create new…</div>
+    <div class="modal-body">
+      <button type="button" id="ch-pick-trip" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0 0 10px;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(10,132,255,0.15);color:var(--c-tint);
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4M3 7v10l9 4 9-4V7M3 7l9 4 9-4M12 11v10"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Trip</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">A one-off shared trip that ends with a settlement.</span>
+        </span>
+      </button>
+      <button type="button" id="ch-pick-club" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(48,209,88,0.18);color:#30d158;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21V12h6v9"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Club (Garaj)</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">An ongoing group with monthly dues, an entry fee, and a shared pool.</span>
+        </span>
+      </button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ch-cancel" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= NEW CLUB MODAL ============================ -->
+<div class="modal" id="modal-new-club" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">New Club</div>
+    <div class="modal-body">
+      <label for="nc-name">Club name</label>
+      <input type="text" id="nc-name" class="field" placeholder="e.g. Garaj" maxlength="60">
+
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <div style="flex:1;">
+          <label for="nc-dues">Monthly dues ($)</label>
+          <input type="number" id="nc-dues" class="field" min="0" step="0.01" placeholder="50">
+        </div>
+        <div style="flex:1;">
+          <label for="nc-entry">Entry fee ($)</label>
+          <input type="number" id="nc-entry" class="field" min="0" step="0.01" placeholder="200">
+        </div>
+      </div>
+
+      <label for="nc-start" style="margin-top:14px;">Start month</label>
+      <input type="month" id="nc-start" class="field">
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.4;">
+        The first month for which dues should be tracked. You can also add
+        members with earlier join dates later, but dues only start from here.
+      </div>
+
+      <div class="msg" id="nc-msg"></div>
+      <div style="font-size:13px;color:var(--c-text-2);margin-top:14px;line-height:1.5;">
+        You'll be the club admin and treasurer by default. You can transfer
+        either role later.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="nc-cancel">Cancel</button>
+      <button class="btn btn-primary" id="nc-create">Create</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= ACCOUNT MODAL ======================= -->
 <div class="modal" id="modal-account" hidden>
   <div class="modal-backdrop"></div>
@@ -1265,7 +1348,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-8.0';
+var APP_VERSION = 'V2-CLUB.1';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -1747,9 +1830,22 @@ async function submitAccessRequest(){
 async function loadTrips(){
   $('trips-content').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   try{
-    var res=await sb.rpc('list_my_trips');
-    if(res.error) throw res.error;
-    state.trips=res.data||[];
+    // Two parallel calls: list_my_trips returns the full UI payload we
+    // already use; list_trip_kinds is a tiny helper that returns just
+    // (trip_id, kind). We splice kind onto each row so we can render
+    // clubs as their own section without touching list_my_trips.
+    var pair = await Promise.all([
+      sb.rpc('list_my_trips'),
+      sb.rpc('list_trip_kinds')
+    ]);
+    if(pair[0].error) throw pair[0].error;
+    var trips = pair[0].data || [];
+    var kindMap = {};
+    (pair[1] && !pair[1].error ? (pair[1].data || []) : []).forEach(function(r){
+      kindMap[r.trip_id] = r.kind;
+    });
+    trips.forEach(function(t){ t.kind = kindMap[t.trip_id] || 'trip'; });
+    state.trips = trips;
     renderTrips();
   }catch(err){
     $('trips-content').innerHTML=
@@ -1765,37 +1861,74 @@ function renderTrips(){
       '<div class="empty-sub">Tap + to create your first trip.</div></div>';
     return;
   }
-  var h='';
-  state.trips.forEach(function(t){
+  // Build one row of HTML per trip; clubs go into their own bucket so
+  // we can show them in a separate section above regular trips.
+  function rowHtml(t){
     var net=Number(t.my_net)||0;
+    var isClub = (t.kind === 'club');
     var pillCls='even', pillTxt='Even';
     if(t.settled){ pillCls='settled'; pillTxt='Settled'; }
     else if(net>0.01){ pillCls='owed'; pillTxt='+'+money(net).replace('-',''); }
     else if(net<-0.01){ pillCls='owe'; pillTxt=money(net); }
-    var lock = t.settled
-      ? '<span class="trip-lock locked" title="Settled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>'
-      : '<span class="trip-lock unlocked" title="Active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></span>';
+    // Clubs never settle in the trip sense, so the lock/even pills aren't
+    // meaningful — we replace them with a small "Active" pill so the
+    // right side of the card still has something to read.
+    var rightHtml;
+    if(isClub){
+      rightHtml = '<span class="pill" style="background:rgba(48,209,88,0.15);'+
+                  'color:#30d158;">Active</span>';
+    } else {
+      var lock = t.settled
+        ? '<span class="trip-lock locked" title="Settled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>'
+        : '<span class="trip-lock unlocked" title="Active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></span>';
+      rightHtml = '<span class="pill '+pillCls+'">'+pillTxt+'</span>' + lock;
+    }
     var creator='';
     if(state.profile && state.profile.is_global_admin){
       creator='<div class="trip-card-creator">Created by '+
         (t.created_by_me?'you':esc(t.creator_name))+'</div>';
     }
-    h+='<div class="trip-card">'+
+    var subText = isClub
+      ? (t.member_count+' '+(t.member_count==1?'member':'members'))
+      : (t.member_count+' '+(t.member_count==1?'person':'people')+' &middot; '+
+         t.expense_count+' '+(t.expense_count==1?'expense':'expenses'));
+    return '<div class="trip-card">'+
       '<div class="trip-card-row">'+
         '<button class="trip-card-inner" data-trip="'+t.trip_id+'">'+
           '<div class="trip-card-name">'+esc(t.name)+'</div>'+
-          '<div class="trip-card-sub">'+t.member_count+' '+
-            (t.member_count==1?'person':'people')+' &middot; '+
-            t.expense_count+' '+(t.expense_count==1?'expense':'expenses')+'</div>'+
+          '<div class="trip-card-sub">'+subText+'</div>'+
           creator+
         '</button>'+
-        '<div class="trip-card-right">'+
-          '<span class="pill '+pillCls+'">'+pillTxt+'</span>'+
-          lock+
-        '</div>'+
+        '<div class="trip-card-right">'+ rightHtml +'</div>'+
       '</div>'+
     '</div>';
+  }
+  // Split into clubs vs trips while preserving the order list_my_trips
+  // already gave us (which respects clubs-first + recency).
+  var clubsHtml = '';
+  var tripsHtml = '';
+  state.trips.forEach(function(t){
+    if(t.kind === 'club') clubsHtml += rowHtml(t);
+    else                  tripsHtml += rowHtml(t);
   });
+  // Section header style. Small uppercase label above each group; the
+  // headers are only shown when BOTH sections have content (otherwise
+  // a single section reads cleanly without a redundant label).
+  var hasBoth = clubsHtml && tripsHtml;
+  function header(txt){
+    return '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+      'text-transform:uppercase;letter-spacing:0.6px;margin:6px 4px 8px;">'+
+      txt + '</div>';
+  }
+  var h = '';
+  if(clubsHtml){
+    if(hasBoth) h += header('Clubs');
+    h += clubsHtml;
+  }
+  if(tripsHtml){
+    if(hasBoth) h += '<div style="height:8px;"></div>' + header('Trips');
+    h += tripsHtml;
+  }
   el.innerHTML=h;
   el.onclick=function(ev){
     var card=ev.target.closest('[data-trip]');
@@ -3779,6 +3912,51 @@ function openNewTrip(){
   openModal('modal-new-trip');
   setTimeout(function(){ $('nt-name').focus(); },150);
 }
+
+// ---- New club (global admin only) ----
+function openNewClub(){
+  $('nc-name').value='';
+  $('nc-dues').value='';
+  $('nc-entry').value='';
+  // Default the start month to the current month so the input isn't empty.
+  var d = new Date();
+  $('nc-start').value =
+    d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  $('nc-msg').className='msg';
+  openModal('modal-new-club');
+  setTimeout(function(){ $('nc-name').focus(); },150);
+}
+async function createClub(){
+  var name = $('nc-name').value.trim();
+  var dues = parseFloat($('nc-dues').value);
+  var entry = parseFloat($('nc-entry').value);
+  var startStr = $('nc-start').value;          // "YYYY-MM"
+  function setMsg(t){ $('nc-msg').className='msg show err'; $('nc-msg').textContent=t; }
+  if(!name){ setMsg('Please enter a club name.'); return; }
+  if(!(dues >= 0)){ setMsg('Please enter monthly dues (0 or more).'); return; }
+  if(!(entry >= 0)){ setMsg('Please enter an entry fee (0 or more).'); return; }
+  if(!startStr){ setMsg('Please pick a start month.'); return; }
+  // Convert "YYYY-MM" -> "YYYY-MM-01" so Postgres treats it as a real date.
+  var startDate = startStr + '-01';
+
+  overlay('Creating club…');
+  try{
+    var res = await sb.rpc('create_club', {
+      p_name: name,
+      p_monthly_dues: dues,
+      p_entry_fee: entry,
+      p_start_month: startDate
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-new-club');
+    overlayOff();
+    toast('Club created');
+    await loadTrips();
+  }catch(err){
+    overlayOff();
+    setMsg(err.message || 'Could not create club.');
+  }
+}
 async function createTrip(){
   var name=$('nt-name').value.trim();
   if(!name){
@@ -5335,7 +5513,16 @@ function showAuth(){
 //  WIRING
 // ============================================================
 $('auth-ver').textContent='Shared Expenses · '+APP_VERSION;
-$('fab-new-trip').onclick=openNewTrip;
+// The "+" on the trips screen: a global admin can create either a Trip
+// or a Club, so they get a small chooser; everyone else goes straight to
+// the New Trip flow (the regular shared-expenses experience).
+$('fab-new-trip').onclick = function(){
+  if(state.profile && state.profile.is_global_admin){
+    openModal('modal-new-chooser');
+  } else {
+    openNewTrip();
+  }
+};
 $('btn-account').onclick=openAccount;
 $('btn-account-2').onclick=openAccount;
 $('btn-account-3').onclick=openAccount;
@@ -5349,6 +5536,19 @@ $('btn-bell-3').onclick=openNotifs;
 $('notif-close').onclick=function(){ closeModal('modal-notif'); };
 $('nt-cancel').onclick=function(){ closeModal('modal-new-trip'); };
 $('nt-create').onclick=createTrip;
+// New-trip / new-club chooser (global admin only).
+$('ch-cancel').onclick = function(){ closeModal('modal-new-chooser'); };
+$('ch-pick-trip').onclick = function(){
+  closeModal('modal-new-chooser');
+  // Slight delay so the previous sheet's close transition has space.
+  setTimeout(openNewTrip, 200);
+};
+$('ch-pick-club').onclick = function(){
+  closeModal('modal-new-chooser');
+  setTimeout(openNewClub, 200);
+};
+$('nc-cancel').onclick = function(){ closeModal('modal-new-club'); };
+$('nc-create').onclick = createClub;
 $('nt-name').addEventListener('keydown',function(e){
   if(e.key==='Enter') createTrip();
 });
@@ -5375,7 +5575,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
