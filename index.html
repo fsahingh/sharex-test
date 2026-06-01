@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.5">
+<meta name="app-version" content="V2-CLUB.6">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -877,6 +877,108 @@
   </button>
 </div>
 
+<!-- ======================= LEDGER ADD CHOOSER (CLUB) ===================
+     Shown when the admin/treasurer taps "+" on the Dues & Expenses tab.
+     Picks between an out-of-pocket expense (existing flow) and a pool
+     inflow (donation, rental, etc.). -->
+<div class="modal" id="modal-ledger-add-chooser" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Record…</div>
+    <div class="modal-body">
+      <button type="button" id="lac-pick-expense" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0 0 10px;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(255,69,58,0.16);color:#ff453a;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Expense</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Money out of the pool — purchases, bills, repairs.</span>
+        </span>
+      </button>
+      <button type="button" id="lac-pick-pool-in" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(48,209,88,0.18);color:#30d158;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Pool In</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Money into the pool — donations, rentals, ad-hoc payments.</span>
+        </span>
+      </button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="lac-cancel" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= POOL IN MODAL ============================== -->
+<div class="modal" id="modal-pool-in" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Record Pool In</div>
+    <div class="modal-body">
+      <div style="font-size:12px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;">Category</div>
+      <div id="pi-cat-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
+        <button type="button" data-cat="donation" style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Donation</button>
+        <button type="button" data-cat="rental"   style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Rental</button>
+        <button type="button" data-cat="entry_fee" style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Entry fee</button>
+        <button type="button" data-cat="dues"     style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Other dues</button>
+      </div>
+      <div style="font-size:11px;color:var(--c-text-3);margin:-8px 0 12px;line-height:1.4;">
+        For regular monthly dues, use the dues row in the list instead — that updates the member's status.
+      </div>
+
+      <label for="pi-amount">Amount ($)</label>
+      <input type="number" id="pi-amount" class="field" min="0" step="0.01">
+
+      <label for="pi-paid-by" style="margin-top:14px;">Paid by</label>
+      <select id="pi-paid-by" class="field"></select>
+
+      <label for="pi-desc" style="margin-top:14px;">Description (optional)</label>
+      <input type="text" id="pi-desc" class="field" maxlength="120">
+
+      <div class="msg" id="pi-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="pi-cancel">Cancel</button>
+      <button class="btn btn-primary" id="pi-save">Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= Z-REPORT MODAL ============================= -->
+<div class="modal" id="modal-zreport" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:85vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Z-Report</div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;align-items:flex-end;">
+        <div style="flex:1;">
+          <label for="zr-period">Month</label>
+          <input type="month" id="zr-period" class="field">
+        </div>
+        <button class="btn btn-primary" id="zr-generate" style="min-height:auto;padding:11px 16px;margin:0;">Generate</button>
+      </div>
+      <div id="zr-body" style="margin-top:14px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="zr-close">Close</button>
+      <button class="btn btn-primary" id="zr-email" hidden>Email to members</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= MARK DUES MODAL =========================== -->
 <div class="modal" id="modal-mark-dues" hidden>
   <div class="modal-backdrop"></div>
@@ -1481,7 +1583,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.5';
+var APP_VERSION = 'V2-CLUB.6';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2638,9 +2740,9 @@ function _renderClubDashboardFromState(){
 
   el.innerHTML = topCards + coverageCard + myCard + recentCard + reportBtn;
 
-  // Wire Z-report (placeholder for now — Step 5 fills it in).
+  // Wire Z-report — opens the report modal with month picker.
   var b = $('club-zreport-btn');
-  if(b){ b.onclick = function(){ toast('Z-Report coming in next step'); }; }
+  if(b){ b.onclick = openClubZReport; }
 }
 
 // Dues & Expenses tab for clubs. Shows a single unified feed of money
@@ -3352,7 +3454,261 @@ async function saveAddClubMember(){
     }
   }
 }
-function openClubLedgerAdd(){ toast('Record movement coming in next step'); }
+// FAB on the Dues & Expenses tab opens a small chooser: the admin/
+// treasurer either logs an out-of-pocket expense (re-using the existing
+// trip expense modal) or records a pool inflow (donation/rental/
+// entry-fee/dues-like ad-hoc payment). The expense modal already knows
+// how to talk to a club because expenses are stored on the trips table.
+function openClubLedgerAdd(){
+  openModal('modal-ledger-add-chooser');
+}
+
+// Opens the existing add-expense modal scoped to the current club.
+// Phase 1: this is a thin pass-through — clubs use the same expense
+// schema as trips, so the modal works without modification.
+function openClubAddExpense(){
+  closeModal('modal-ledger-add-chooser');
+  setTimeout(function(){ openExpenseModal(null); }, 180);
+}
+
+// Opens the Pool In modal so the admin/treasurer can record a donation,
+// rental income, an extra entry-fee payment, or a one-off dues payment.
+function openClubPoolIn(){
+  closeModal('modal-ledger-add-chooser');
+  setTimeout(_openPoolInModalFresh, 180);
+}
+function _openPoolInModalFresh(){
+  var t = state.trip;
+  // Default to "donation" — the most common ad-hoc inflow.
+  state.poolInCategory = 'donation';
+  _refreshPoolInChips();
+  $('pi-amount').value = '';
+  $('pi-desc').value = '';
+  // Member dropdown: anyone in the club (active or not), with the
+  // treasurer pre-selected if they're a member (common case: the
+  // treasurer takes the cash in and is the one being recorded as having
+  // "paid" it). Falls back to the first member.
+  var sel = $('pi-paid-by');
+  sel.innerHTML = '<option value="">— Select —</option>';
+  (t.members || []).forEach(function(m){
+    var nm = displayName(m);
+    sel.innerHTML += '<option value="'+esc(m.directory_id)+'">'+esc(nm)+'</option>';
+  });
+  // Default to the current user if they're a member.
+  if(t.my_directory_id) sel.value = t.my_directory_id;
+  $('pi-msg').className = 'msg';
+  openModal('modal-pool-in');
+  setTimeout(function(){ $('pi-amount').focus(); }, 150);
+}
+
+// Updates the chip row styling so the active category stands out.
+function _refreshPoolInChips(){
+  document.querySelectorAll('#pi-cat-chips [data-cat]').forEach(function(c){
+    var active = (c.dataset.cat === state.poolInCategory);
+    c.style.background = active ? 'var(--c-tint)' : 'var(--c-card)';
+    c.style.color      = active ? '#fff'           : 'var(--c-text)';
+    c.style.borderColor= active ? 'var(--c-tint)'  : 'var(--c-border)';
+  });
+  // Description placeholder hints at the chosen category.
+  var hint = ({
+    dues:      'e.g. May dues — Mehmet',
+    donation:  'e.g. Anonymous donation',
+    rental:    'e.g. Weekend rental — Ali',
+    entry_fee: 'e.g. Late entry fee — Veli'
+  })[state.poolInCategory] || '';
+  $('pi-desc').placeholder = hint;
+}
+
+async function submitPoolIn(){
+  var amt = parseFloat($('pi-amount').value);
+  var paidBy = $('pi-paid-by').value || null;
+  var desc = $('pi-desc').value.trim() || null;
+  var cat = state.poolInCategory;
+  function setMsg(t){ $('pi-msg').className='msg show err'; $('pi-msg').textContent=t; }
+  if(!(amt > 0)){ setMsg('Enter an amount greater than zero.'); return; }
+  if(!cat){ setMsg('Pick a category.'); return; }
+  var btn = $('pi-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('record_pool_in', {
+      p_trip: state.trip.trip_id,
+      p_paid_by: paidBy,
+      p_amount: amt,
+      p_category: cat,
+      p_description: desc
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-pool-in');
+    toast('Recorded');
+    // Invalidate all club caches so dashboard, ledger, members refresh.
+    state.clubLedgerLoadedFor = null;
+    state.clubMembersLoadedFor = null;
+    state.clubDashboardLoadedFor = null;
+    renderActiveTab();
+  }catch(err){
+    setMsg(err.message || 'Could not save.');
+  }
+  btn.disabled = false; btn.textContent = 'Record';
+}
+
+// ---- Z-Report ---------------------------------------------------------
+// Admin/treasurer-only summary of a single month: opening pool, inflows
+// by category, expenses, closing pool, dues status per member. Phase 1
+// surfaces this read-only with an "Email all members" affordance that
+// re-uses the existing Apps Script mail proxy.
+function openClubZReport(){
+  var t = state.trip;
+  // Default to the most recent past month — that's the typical "close
+  // last month" use case. (Current month is also fine — admin picks.)
+  var d = new Date();
+  d.setDate(1); d.setMonth(d.getMonth() - 1);
+  $('zr-period').value =
+    d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  $('zr-body').innerHTML =
+    '<div style="text-align:center;color:var(--c-text-3);font-size:13px;padding:20px 0;">'+
+    'Pick a month and tap "Generate" to load the report.</div>';
+  state.zReportData = null;
+  openModal('modal-zreport');
+}
+
+async function generateZReport(){
+  var p = $('zr-period').value;
+  if(!p){ toast('Pick a month first', true); return; }
+  var period = p + '-01';
+  $('zr-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_club_monthly_report',
+      { p_trip: state.trip.trip_id, p_period: period });
+    if(res.error) throw res.error;
+    state.zReportData = res.data;
+    _renderZReport(res.data);
+  }catch(err){
+    $('zr-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function _renderZReport(r){
+  // ---- Top: opening / in / out / closing summary -----------------
+  var summary =
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;">'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:12px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Opening</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;">'+ money(r.pool_opening||0) +'</div>'+
+      '</div>'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:12px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Closing</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;">'+ money(r.pool_closing||0) +'</div>'+
+      '</div>'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:12px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;letter-spacing:0.5px;">In</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#30d158;">+'+ money(r.in_total||0) +'</div>'+
+      '</div>'+
+      '<div style="background:var(--c-card);border-radius:var(--r);padding:12px;text-align:center;">'+
+        '<div style="font-size:10px;font-weight:700;color:#ff453a;text-transform:uppercase;letter-spacing:0.5px;">Out</div>'+
+        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#ff453a;">-'+ money(r.out_total||0) +'</div>'+
+      '</div>'+
+    '</div>';
+
+  // ---- Inflows by category --------------------------------------
+  var byCat = r.in_by_category || {};
+  var catKeys = Object.keys(byCat).sort();
+  var catHtml = '';
+  if(catKeys.length){
+    var catRows = catKeys.map(function(k){
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;'+
+        'font-size:13px;color:var(--c-text);">'+
+        '<span>'+esc(_clubCategoryLabel(k))+'</span>'+
+        '<span style="font-weight:600;color:#30d158;">+'+money(byCat[k])+'</span>'+
+        '</div>';
+    }).join('');
+    catHtml = '<div style="background:var(--c-card);border-radius:var(--r);padding:10px 14px;margin-bottom:14px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Inflows</div>'+
+      catRows +
+      '</div>';
+  }
+
+  // ---- Expenses (one row per) -----------------------------------
+  var expHtml = '';
+  if((r.expenses||[]).length){
+    var expRows = r.expenses.map(function(e){
+      var when = e.at ? new Date(e.at).toLocaleDateString(undefined,
+        {month:'short', day:'numeric'}) : '';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--c-border);">'+
+        '<div style="min-width:0;">'+
+          '<div style="font-size:13px;">'+esc(e.description||'')+'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);">'+esc(e.paid_by||'')+(when?' &middot; '+when:'')+'</div>'+
+        '</div>'+
+        '<div style="font-size:13px;font-weight:700;color:#ff453a;margin-left:10px;white-space:nowrap;">-'+money(e.amount||0)+'</div>'+
+      '</div>';
+    }).join('');
+    expHtml = '<div style="background:var(--c-card);border-radius:var(--r);padding:4px 14px 10px;margin-bottom:14px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 4px;">Expenses</div>'+
+      expRows +
+      '</div>';
+  }
+
+  // ---- Dues status this month -----------------------------------
+  var duesHtml = '';
+  if((r.dues||[]).length){
+    var paidCount = r.dues.filter(function(d){ return d.status==='paid'; }).length;
+    var duesRows = r.dues.map(function(d){
+      var color, lbl;
+      if(d.status==='paid'){ color='#30d158'; lbl='Paid'; }
+      else if(d.status==='partial'){ color='#ff9f0a'; lbl='Partial — '+money(d.paid_amount)+' of '+money(d.amount); }
+      else { color='#ff453a'; lbl='Unpaid — '+money(d.amount); }
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--c-border);">'+
+        '<div style="font-size:13px;">'+esc(d.display_name||'')+'</div>'+
+        '<div style="font-size:12px;font-weight:600;color:'+color+';margin-left:10px;">'+lbl+'</div>'+
+      '</div>';
+    }).join('');
+    duesHtml = '<div style="background:var(--c-card);border-radius:var(--r);padding:4px 14px 10px;margin-bottom:14px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 4px;">Dues &middot; '+paidCount+' of '+r.dues.length+' paid</div>'+
+      duesRows +
+      '</div>';
+  }
+
+  $('zr-body').innerHTML = summary + catHtml + expHtml + duesHtml;
+  // Allow emailing only if we actually have data and the user is admin.
+  $('zr-email').hidden = !(state.trip && state.trip.is_admin);
+}
+
+// Email-all is best-effort for Phase 1: it just composes a short text
+// summary and lets the admin pick where to send it (mailto:). A nicer
+// HTML email via the Apps Script proxy can be added later — Phase 1
+// keeps the surface small.
+function emailZReport(){
+  var r = state.zReportData;
+  if(!r) return;
+  var t = state.trip;
+  var lines = [
+    'Z-Report for ' + (t.name) + ' — ' + r.period_label,
+    '',
+    'Opening pool:  ' + money(r.pool_opening||0),
+    'Inflows:       ' + money(r.in_total||0),
+    'Expenses:      ' + money(r.out_total||0),
+    'Closing pool:  ' + money(r.pool_closing||0),
+    '',
+    'Dues status:'
+  ];
+  (r.dues || []).forEach(function(d){
+    var st = (d.status==='paid') ? 'PAID'
+      : (d.status==='partial') ? ('PARTIAL '+money(d.paid_amount)+'/'+money(d.amount))
+      : ('UNPAID '+money(d.amount));
+    lines.push('  - ' + (d.display_name||'?') + ': ' + st);
+  });
+  // Recipient list: every active member with an email.
+  var emails = (t.members || [])
+    .filter(function(m){ return !m.is_inactive && m.email; })
+    .map(function(m){ return m.email; });
+  var subject = encodeURIComponent('Z-Report — ' + t.name + ' — ' + r.period_label);
+  var body = encodeURIComponent(lines.join('\n'));
+  var to = encodeURIComponent(emails.join(','));
+  // mailto: opens the user's default mail client with the draft ready.
+  // No data leaves the device until they hit Send themselves.
+  window.location.href = 'mailto:'+to+'?subject='+subject+'&body='+body;
+}
 
 
 function renderPeopleTab(){
@@ -6628,6 +6984,27 @@ $('md-save').onclick   = submitMarkDuesPaid;
 $('md-unpaid').onclick = submitMarkDuesUnpaid;
 // Dues matrix modal close.
 $('dm-close').onclick  = function(){ closeModal('modal-dues-matrix'); };
+
+// Ledger add chooser (Expense vs Pool In) — shown when admin/treasurer
+// taps the FAB on the Dues & Expenses tab.
+$('lac-cancel').onclick      = function(){ closeModal('modal-ledger-add-chooser'); };
+$('lac-pick-expense').onclick = openClubAddExpense;
+$('lac-pick-pool-in').onclick = openClubPoolIn;
+
+// Pool In modal: category chip selection + submit/cancel.
+$('pi-cancel').onclick = function(){ closeModal('modal-pool-in'); };
+$('pi-save').onclick   = submitPoolIn;
+document.querySelectorAll('#pi-cat-chips [data-cat]').forEach(function(c){
+  c.onclick = function(){
+    state.poolInCategory = c.dataset.cat;
+    _refreshPoolInChips();
+  };
+});
+
+// Z-Report modal: generate / email / close.
+$('zr-close').onclick    = function(){ closeModal('modal-zreport'); };
+$('zr-generate').onclick = generateZReport;
+$('zr-email').onclick    = emailZReport;
 $('acm-search').addEventListener('input', function(){
   $('acm-results').dataset.pickedDir = '';
   $('acm-first').value=''; $('acm-last').value=''; $('acm-email').value='';
@@ -6692,7 +7069,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
