@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.7">
+<meta name="app-version" content="V2-CLUB.8">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1547,6 +1547,23 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
         <span>Recycle bin</span>
       </button>
+
+      <!-- Debug "View as" toggle. Only the global admin sees this. It
+           lets the admin preview the club Dashboard the way a regular
+           member or treasurer would see it, without having to sign in
+           with a different account. Stored in sessionStorage so a hard
+           refresh keeps the chosen mode, while signing out clears it. -->
+      <div id="acc-viewas-wrap" hidden style="margin-top:24px;padding-top:18px;border-top:1px solid var(--c-border);">
+        <div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Debug — View clubs as</div>
+        <div id="acc-viewas-chips" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" data-viewas="admin"     style="flex:1;min-width:90px;padding:9px 8px;border-radius:var(--r-sm);font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Global Admin</button>
+          <button type="button" data-viewas="treasurer" style="flex:1;min-width:90px;padding:9px 8px;border-radius:var(--r-sm);font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Treasurer</button>
+          <button type="button" data-viewas="member"    style="flex:1;min-width:90px;padding:9px 8px;border-radius:var(--r-sm);font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Member</button>
+        </div>
+        <div style="font-size:11px;color:var(--c-text-3);margin-top:8px;line-height:1.4;">
+          Changes the club Dashboard preview only. Backend permissions are unchanged.
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="acc-close">Close</button>
@@ -1583,7 +1600,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.7';
+var APP_VERSION = 'V2-CLUB.8';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2628,6 +2645,17 @@ function _renderClubDashboardFromState(){
   // the personal-focus layout. We branch here so the two surfaces can
   // evolve independently without affecting each other.
   var isAdmin = !!(t.is_admin || state.is_treasurer);
+  // Debug "View as" preview: a global admin can preview either of the
+  // two non-admin layouts to verify how they look. The toggle lives in
+  // the Account modal and only ever affects this single render — all
+  // backend permissions are unaffected.
+  var isGA = !!(state.profile && state.profile.is_global_admin);
+  if(isGA){
+    var viewAs = getClubViewAs();
+    if(viewAs === 'member')    isAdmin = false;
+    else if(viewAs === 'treasurer') isAdmin = true;   // treasurer == admin layout in Phase 1
+    // 'admin' (or default): leave isAdmin as-is
+  }
   if(isAdmin){
     _renderClubDashboardAdmin(d, t, el);
   } else {
@@ -5606,11 +5634,40 @@ function openAccount(){
   $('acc-version').onclick = function(){ checkForNewVersion(true); };
   // Recycle bin entry — only the global admin can see it.
   $('acc-recycle').hidden = !(state.profile && state.profile.is_global_admin);
+  // View-as debug toggle — global admin only. Reflects the current
+  // selection (default "admin") and wires the chip clicks.
+  var isGA = !!(state.profile && state.profile.is_global_admin);
+  $('acc-viewas-wrap').hidden = !isGA;
+  if(isGA){
+    var current = getClubViewAs();
+    document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b){
+      var on = (b.dataset.viewas === current);
+      b.style.background  = on ? 'var(--c-tint)' : 'var(--c-card)';
+      b.style.color       = on ? '#fff'           : 'var(--c-text)';
+      b.style.borderColor = on ? 'var(--c-tint)'  : 'var(--c-border)';
+    });
+  }
   openModal('modal-account');
+}
+
+// "View clubs as" debug helper. Stored in sessionStorage so a refresh
+// preserves the choice; cleared on sign-out so the next user starts
+// fresh. Returns one of 'admin' | 'treasurer' | 'member'.
+function getClubViewAs(){
+  try {
+    var v = sessionStorage.getItem('clubViewAs');
+    if(v === 'member' || v === 'treasurer') return v;
+  } catch(_){}
+  return 'admin';
+}
+function setClubViewAs(v){
+  try { sessionStorage.setItem('clubViewAs', v); } catch(_){}
 }
 async function doSignOut(){
   overlay('Signing out…');
   await sb.auth.signOut();
+  // Clear the debug view-as preference so the next sign-in starts fresh.
+  try { sessionStorage.removeItem('clubViewAs'); } catch(_){}
   overlayOff();
   closeModal('modal-account');
   // onAuthStateChange clears the session; we then show the email screen.
@@ -7141,6 +7198,30 @@ $('fab-new-trip').onclick = function(){
 $('btn-account').onclick=openAccount;
 $('btn-account-2').onclick=openAccount;
 $('btn-account-3').onclick=openAccount;
+// View-as chip clicks (global admin only). Updates session preference,
+// re-renders the chip selection inside the modal, and invalidates the
+// dashboard cache so the next view of the Dashboard tab respects the
+// new mode without forcing a manual refresh.
+document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b){
+  b.onclick = function(){
+    setClubViewAs(b.dataset.viewas);
+    // Re-paint chip states immediately so the user sees the choice.
+    document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(bb){
+      var on = (bb.dataset.viewas === b.dataset.viewas);
+      bb.style.background  = on ? 'var(--c-tint)' : 'var(--c-card)';
+      bb.style.color       = on ? '#fff'           : 'var(--c-text)';
+      bb.style.borderColor = on ? 'var(--c-tint)'  : 'var(--c-border)';
+    });
+    // If a club dashboard is currently visible, re-render it so the
+    // change is felt immediately. clubDashboard data is already cached
+    // (the RPC payload doesn't depend on the viewer's role), so we just
+    // route through the dispatcher.
+    if(state.trip && state.trip.kind === 'club' && state.activeTab === 'dashboard'){
+      _renderClubDashboardFromState();
+    }
+    toast('Viewing as ' + b.dataset.viewas);
+  };
+});
 $('btn-directory').onclick=openDirectory;
 $('btn-directory-2').onclick=openDirectory;
 $('btn-directory-3').onclick=openDirectory;
