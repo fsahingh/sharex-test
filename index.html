@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.6">
+<meta name="app-version" content="V2-CLUB.7">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1583,7 +1583,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.6';
+var APP_VERSION = 'V2-CLUB.7';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2624,9 +2624,233 @@ function _renderClubDashboardFromState(){
   var d = state.clubDashboard || {};
   var t = state.trip;
   var el = $('tab-dashboard');
+  // Admins (and the global admin) see the wide overview; members see
+  // the personal-focus layout. We branch here so the two surfaces can
+  // evolve independently without affecting each other.
+  var isAdmin = !!(t.is_admin || state.is_treasurer);
+  if(isAdmin){
+    _renderClubDashboardAdmin(d, t, el);
+  } else {
+    _renderClubDashboardMember(d, t, el);
+  }
+}
+
+// ============================================================
+//  MEMBER DASHBOARD
+//  Centerpiece: a big avatar circled by a 12-segment ring that shows
+//  the caller's dues status for every month of the current calendar
+//  year. The "Your status" card under it names any unpaid months so
+//  the member can act on them. No admin-only affordances are shown.
+// ============================================================
+function _renderClubDashboardMember(d, t, el){
+  var months = d.my_year_months || [];
+  var year   = d.year || (new Date()).getFullYear();
+
+  // Pick out the current month so it can pulse / read "This month".
+  var nowPeriod = d.current_period;
+  // Build initials for the avatar.
+  var meMember = (t.members || []).filter(function(m){ return m.is_me; })[0];
+  var meInitials = meMember ? initials(meMember) : '?';
+  var meName     = meMember ? displayName(meMember) : '';
+
+  // ---- The ring is rendered as an SVG so we get clean curved
+  // segments and crisp scaling. Each month is a 30° arc with a small
+  // gap between segments. Colors come from a status → palette map. ----
+  var ringSvg = _renderYearRingSvg(months, 168, 14, 4);
+
+  // Side column on desktop / stacked column on narrow screens. We use
+  // grid with auto-fit so the layout collapses gracefully.
+  var contributionLine = (d.my_year_contributed != null)
+    ? '<div style="font-size:12px;color:var(--c-text-3);margin-top:2px;">You contributed <strong style="color:var(--c-text);">'+money(d.my_year_contributed||0)+'</strong> in '+year+'</div>'
+    : '';
+  var heroCard =
+    '<div style="background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
+      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">'+
+        // Left — avatar + ring
+        '<div style="position:relative;width:168px;height:168px;flex-shrink:0;margin:0 auto;">'+
+          ringSvg +
+          '<div style="position:absolute;inset:28px;border-radius:50%;background:var(--c-bg);'+
+            'display:flex;align-items:center;justify-content:center;'+
+            'font-size:36px;font-weight:700;color:var(--c-text);">'+esc(meInitials)+'</div>'+
+        '</div>'+
+        // Right — quick read-outs
+        '<div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:14px;">'+
+          '<div>'+
+            '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Pool balance</div>'+
+            '<div style="font-size:22px;font-weight:800;margin-top:2px;">'+money(d.pool_balance||0)+'</div>'+
+            contributionLine +
+          '</div>'+
+          '<div>'+
+            '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">This month</div>'+
+            '<div style="font-size:14px;color:var(--c-text);margin-top:2px;">'+esc(d.current_period_label||'')+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      // Legend below the hero — tiny and unobtrusive.
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
+            'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
+        _ringLegendItem('#30d158', 'Paid')+
+        _ringLegendItem('#ff9f0a', 'Partial')+
+        _ringLegendItem('#0a84ff', 'Current')+
+        _ringLegendItem('#ff453a', 'Overdue')+
+        _ringLegendItem('#3a3a3c', 'Not member', true)+
+      '</div>'+
+    '</div>';
+
+  // ---- "Your status" card: explains exactly what's owed. ----
+  var statusCard;
+  var unpaidPeriods = d.my_unpaid_periods || [];
+  // Distinguish "current month not yet paid" from "overdue months". The
+  // current month being unpaid is normal until it gets paid; truly
+  // overdue months are the ones the member should worry about.
+  var overdue = unpaidPeriods.filter(function(p){ return p.period < nowPeriod; });
+  var thisMonth = unpaidPeriods.filter(function(p){ return p.period === nowPeriod; });
+  if(unpaidPeriods.length === 0){
+    statusCard =
+      '<div style="background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.32);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
+        '<div style="display:flex;align-items:center;gap:10px;">'+
+          '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#30d158;color:#fff;align-items:center;justify-content:center;flex-shrink:0;">'+
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
+          '</span>'+
+          '<div>'+
+            '<div style="font-size:15px;font-weight:700;color:#30d158;">Paid — All caught up</div>'+
+            '<div style="font-size:12px;color:var(--c-text-2);margin-top:1px;">Nothing owed right now.</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  } else {
+    // Build a readable summary: amount + month names.
+    var monthNames = unpaidPeriods.map(function(p){ return p.label; }).join(', ');
+    var color = overdue.length ? '#ff453a' : '#ff9f0a';
+    var bg    = overdue.length ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)';
+    var border= overdue.length ? 'rgba(255,69,58,0.34)' : 'rgba(255,159,10,0.34)';
+    var headline = overdue.length
+      ? (overdue.length === 1
+          ? 'Unpaid — 1 month behind'
+          : 'Unpaid — '+overdue.length+' months behind')
+      : 'Due this month';
+    statusCard =
+      '<div style="background:'+bg+';border:1px solid '+border+';border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
+        '<div style="display:flex;align-items:center;gap:10px;">'+
+          '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:'+color+';color:#fff;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;">○</span>'+
+          '<div>'+
+            '<div style="font-size:15px;font-weight:700;color:'+color+';">'+esc(headline)+'</div>'+
+            '<div style="font-size:13px;color:var(--c-text);margin-top:2px;"><strong>'+money(d.my_unpaid_total||0)+'</strong> across '+unpaidPeriods.length+' month'+(unpaidPeriods.length===1?'':'s')+'</div>'+
+            '<div style="font-size:11px;color:var(--c-text-3);margin-top:3px;">'+esc(monthNames)+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+  // ---- Recent activity (compact, last 5) -----------------------
+  var recentRows = '';
+  (d.recent || []).slice(0, 5).forEach(function(ev){
+    var sign, color, lbl;
+    if(ev.kind === 'expense'){
+      sign = '-'; color = '#ff453a';
+      lbl = ev.description || 'Expense';
+    } else if(ev.kind === 'pool_in'){
+      sign = '+'; color = '#30d158';
+      lbl = (ev.description || _clubCategoryLabel(ev.category));
+    } else {
+      sign = '+'; color = '#30d158';
+      lbl = 'Dues paid — ' + (ev.period_label || '');
+    }
+    var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
+      {month:'short', day:'numeric'}) : '';
+    recentRows +=
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
+        '<div style="min-width:0;">'+
+          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
+        '</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+      '</div>';
+  });
+  if(!recentRows){
+    recentRows = '<div style="padding:18px 0;text-align:center;color:var(--c-text-3);font-size:13px;">No activity yet.</div>';
+  }
+  var recentCard =
+    '<div style="background:var(--c-card);border-radius:var(--r);padding:6px 16px 12px;">'+
+      '<div style="padding:14px 0 4px;font-size:13px;font-weight:700;">Recent activity</div>'+
+      recentRows +
+    '</div>';
+
+  el.innerHTML = heroCard + statusCard + recentCard;
+}
+
+// Helper: build a 12-segment ring as inline SVG. Each segment is one
+// month, rendered as an arc the same thickness. Colours follow the
+// status palette agreed with the user.
+function _renderYearRingSvg(months, size, thickness, gapDeg){
+  if(!months || !months.length){
+    return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'"></svg>';
+  }
+  var cx = size/2, cy = size/2;
+  var r  = (size/2) - (thickness/2) - 2;
+  var totalSeg = 12;
+  var segDeg   = 360 / totalSeg;
+  var paths = '';
+  // Convention: month 0 (Jan) starts at the top (-90°) and the ring
+  // rotates clockwise like a clock face.
+  for(var i = 0; i < totalSeg; i++){
+    var m = months[i] || {status:'future'};
+    var color = _statusColor(m.status);
+    var startDeg = -90 + (i * segDeg) + (gapDeg/2);
+    var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
+    paths += _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, m.label || '');
+  }
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" '+
+    'style="display:block;">'+ paths +'</svg>';
+}
+function _statusColor(status){
+  return ({
+    paid:       '#30d158',
+    partial:    '#ff9f0a',
+    current:    '#0a84ff',
+    unpaid:     '#ff453a',   // truly overdue (past month, unpaid)
+    not_member: '#3a3a3c',   // muted gray
+    future:     '#3a3a3c'    // muted gray for future months
+  })[status] || '#3a3a3c';
+}
+function _statusOpacity(status){
+  // Future/not-member months stay visible but dimmed so the live data
+  // pops without the ring looking incomplete.
+  return (status === 'future' || status === 'not_member') ? 0.28 : 1;
+}
+function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label){
+  function pt(angleDeg){
+    var a = angleDeg * Math.PI / 180;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  }
+  var p1 = pt(startDeg);
+  var p2 = pt(endDeg);
+  var largeArc = (endDeg - startDeg) > 180 ? 1 : 0;
+  // Decide the segment opacity based on whichever status we were given
+  // via the colour map. We re-derive it here so the helper doesn't
+  // need the status object passed in twice.
+  var opacity = (color === '#3a3a3c') ? 0.28 : 1;
+  var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
+  return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
+         '" stroke-linecap="round" fill="none" opacity="'+opacity+'">'+
+         (label ? '<title>'+esc(label)+'</title>' : '') +
+         '</path>';
+}
+function _ringLegendItem(color, label, muted){
+  var op = muted ? 0.28 : 1;
+  return '<span style="display:inline-flex;align-items:center;gap:5px;">'+
+    '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';opacity:'+op+';"></span>'+
+    esc(label) + '</span>';
+}
+
+// ============================================================
+//  ADMIN DASHBOARD (unchanged for now — Step B will redesign).
+//  Renders the existing summary layout so admins/treasurers keep
+//  the data they had until the next iteration lands.
+// ============================================================
+function _renderClubDashboardAdmin(d, t, el){
   var canEdit = !!(t.is_admin || state.is_treasurer);
 
-  // --- Top stat row: Pool / This month In / This month Out ----------
   var topCards =
     '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">'+
       '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
@@ -2646,7 +2870,6 @@ function _renderClubDashboardFromState(){
       '</div>'+
     '</div>';
 
-  // --- Dues coverage card for the current month ---------------------
   var duesPaid = Number(d.dues_paid_this_month) || 0;
   var duesPending = Number(d.dues_pending_this_month) || 0;
   var coveragePct = (duesPaid + duesPending) > 0
@@ -2666,36 +2889,6 @@ function _renderClubDashboardFromState(){
       '</div>'+
     '</div>';
 
-  // --- "Your status" — current member's own dues for this month -----
-  var myCard = '';
-  if(d.my_dues){
-    var s = d.my_dues.status;
-    var amt = Number(d.my_dues.amount) || 0;
-    var paid = Number(d.my_dues.paid_amount) || 0;
-    var headline, color, sub;
-    if(s === 'paid'){
-      headline = 'Paid'; color = '#30d158';
-      sub = money(amt) + ' for ' + esc(d.current_period_label);
-    } else if(s === 'partial'){
-      headline = 'Partial'; color = '#ff9f0a';
-      sub = money(paid)+' of '+money(amt)+' for '+esc(d.current_period_label);
-    } else {
-      headline = 'Unpaid'; color = '#ff453a';
-      sub = money(amt) + ' due for ' + esc(d.current_period_label);
-    }
-    myCard =
-      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;">'+
-        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Your status</div>'+
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">'+
-          '<div>'+
-            '<div style="font-size:16px;font-weight:700;color:'+color+';">'+headline+'</div>'+
-            '<div style="font-size:12px;color:var(--c-text-2);margin-top:2px;">'+sub+'</div>'+
-          '</div>'+
-        '</div>'+
-      '</div>';
-  }
-
-  // --- Recent activity ---------------------------------------------
   var recentRows = '';
   (d.recent || []).forEach(function(ev){
     var sign, color, lbl;
@@ -2706,7 +2899,6 @@ function _renderClubDashboardFromState(){
       sign = '+'; color = '#30d158';
       lbl = (ev.description || _clubCategoryLabel(ev.category));
     } else {
-      // dues_paid
       sign = '+'; color = '#30d158';
       lbl = 'Dues paid — ' + (ev.period_label || '');
     }
@@ -2730,7 +2922,6 @@ function _renderClubDashboardFromState(){
       recentRows +
     '</div>';
 
-  // --- Z-report button (admin/treasurer only) ----------------------
   var reportBtn = '';
   if(canEdit){
     reportBtn =
@@ -2738,9 +2929,8 @@ function _renderClubDashboardFromState(){
         'style="width:100%;margin-top:4px;">Generate Z-Report</button>';
   }
 
-  el.innerHTML = topCards + coverageCard + myCard + recentCard + reportBtn;
+  el.innerHTML = topCards + coverageCard + recentCard + reportBtn;
 
-  // Wire Z-report — opens the report modal with month picker.
   var b = $('club-zreport-btn');
   if(b){ b.onclick = openClubZReport; }
 }
