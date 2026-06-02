@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.8">
+<meta name="app-version" content="V2-CLUB.9">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1532,6 +1532,94 @@
   </div>
 </div>
 
+<!-- ======================= MEMBER ACTION CHOOSER ======================
+     Shown when a club member taps the "+" FAB on their dashboard.
+     Two paths: log an out-of-pocket expense, or claim a dues payment. -->
+<div class="modal" id="modal-member-action" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">What did you do?</div>
+    <div class="modal-body">
+      <button type="button" id="ma-pick-expense" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0 0 10px;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(255,69,58,0.16);color:#ff453a;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Add Expense</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Something you paid out of pocket for the club.</span>
+        </span>
+      </button>
+      <button type="button" id="ma-pick-dues" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:0;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(48,209,88,0.18);color:#30d158;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">I paid dues</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Submit a claim for a monthly dues payment you made.</span>
+        </span>
+      </button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ma-cancel" style="flex:1;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= SEE MEMBERS MODAL (member view) ============
+     A privacy-conscious member list: names + role badges only, no emails. -->
+<div class="modal" id="modal-see-members" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Members</div>
+    <div class="modal-body" id="sm-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="sm-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MY YEAR ACTIVITY MODAL (member view) =======
+     Full personal activity for the calendar year — what the user paid,
+     their dues marked paid, and any pool-ins attributed to them. -->
+<div class="modal" id="modal-my-activity" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:85vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Your activity this year</div>
+    <div class="modal-body" id="mya-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="mya-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= I PAID DUES MODAL =========================
+     Member-side claim form: pick an unpaid month, amount, optional note.
+     Submission lands in the admin's notification bell. -->
+<div class="modal" id="modal-dues-claim" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">I paid dues</div>
+    <div class="modal-body" id="dc-body"></div>
+    <div class="msg" id="dc-msg" style="margin:0 0 12px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="dc-cancel">Cancel</button>
+      <button class="btn btn-primary" id="dc-submit" disabled>Submit claim</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= ACCOUNT MODAL ======================= -->
 <div class="modal" id="modal-account" hidden>
   <div class="modal-backdrop"></div>
@@ -1600,7 +1688,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.8';
+var APP_VERSION = 'V2-CLUB.9';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2242,6 +2330,22 @@ async function openTripInternal(tripId, tab){
       // setActiveTab to decide if the FAB should appear.
       var myDir = state.trip.my_directory_id;
       state.is_treasurer = (myDir && myDir === state.trip.treasurer_directory_id);
+      // Members get a single-pane experience: the entire dashboard fits
+      // their needs (status, history, members list via modal, dues claim
+      // via FAB), so the tab bar would just add visual noise. Admins and
+      // treasurers keep all three tabs. The global admin always sees the
+      // admin layout but can use the View-As toggle to preview the
+      // member experience — in that case we hide the tab bar too so the
+      // preview matches what a real member sees.
+      var effIsAdmin = !!(state.trip.is_admin || state.is_treasurer);
+      var isGA = !!(state.profile && state.profile.is_global_admin);
+      if(isGA && getClubViewAs() === 'member') effIsAdmin = false;
+      if(!effIsAdmin){
+        // Force the dashboard tab and hide the entire tab strip so the
+        // dashboard becomes the only surface for members.
+        state.activeTab = 'dashboard';
+        hide('tabs-club');
+      }
       $('tab-dashboard').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
     } else {
       show('tabs-trip'); hide('tabs-club');
@@ -2520,15 +2624,26 @@ function setActiveTab(name){
   if(!state.trip){ hide('td-fab'); fab.onclick=null; return; }
   var isClub = (state.trip.kind === 'club');
   if(isClub){
-    // Phase 1 club FAB: only admin/treasurer can add — Members tab adds
-    // a member, Ledger tab adds an expense or pool-in (we'll wire that
-    // in Step 3). For now, hide the FAB on Dashboard.
+    // Effective role for this render: real role unless the global admin
+    // is previewing as a member.
     var canEdit = !!(state.trip.is_admin || state.is_treasurer);
-    if(!canEdit){ hide('td-fab'); fab.onclick=null; return; }
-    if(name === 'members'){
-      show('td-fab'); fab.onclick = openAddClubMember;
-    } else if(name === 'ledger'){
-      show('td-fab'); fab.onclick = openClubLedgerAdd;
+    var isGA = !!(state.profile && state.profile.is_global_admin);
+    if(isGA && getClubViewAs() === 'member') canEdit = false;
+    if(canEdit){
+      // Admin/treasurer FAB targets match the active tab.
+      if(name === 'members'){
+        show('td-fab'); fab.onclick = openAddClubMember;
+      } else if(name === 'ledger'){
+        show('td-fab'); fab.onclick = openClubLedgerAdd;
+      } else {
+        hide('td-fab'); fab.onclick = null;
+      }
+      return;
+    }
+    // Member-only: the dashboard is the only screen, so the FAB lives
+    // there and opens the member-action chooser (Add Expense / I paid dues).
+    if(name === 'dashboard'){
+      show('td-fab'); fab.onclick = openMemberAction;
     } else {
       hide('td-fab'); fab.onclick = null;
     }
@@ -2680,6 +2795,20 @@ function _renderClubDashboardMember(d, t, el){
   var meMember = (t.members || []).filter(function(m){ return m.is_me; })[0];
   var meInitials = meMember ? initials(meMember) : '?';
   var meName     = meMember ? displayName(meMember) : '';
+  // For the global admin previewing as a member, there's no "me" entry —
+  // fall back to the profile's initials so the avatar still reads.
+  if(meInitials === '?' && state.profile){
+    var nm = ((state.profile.first_name||'') + (state.profile.last_name||'')).replace(/\s/g,'');
+    if(nm) meInitials =
+      ((state.profile.first_name||'')[0]||'').toUpperCase() +
+      ((state.profile.last_name||'')[0]||'').toUpperCase();
+    else if(state.profile.email) meInitials = state.profile.email[0].toUpperCase();
+  }
+  // Caller's own directory_id — used to filter recent activity to a
+  // strictly personal feed. The global admin previewing as a member
+  // doesn't get a separate directory id (they're still themselves), so
+  // we fall back to the caller's directory id on state.trip.
+  var myDir = (meMember && meMember.directory_id) || t.my_directory_id || null;
 
   // ---- The ring is rendered as an SVG so we get clean curved
   // segments and crisp scaling. Each month is a 30° arc with a small
@@ -2691,9 +2820,25 @@ function _renderClubDashboardMember(d, t, el){
   var contributionLine = (d.my_year_contributed != null)
     ? '<div style="font-size:12px;color:var(--c-text-3);margin-top:2px;">You contributed <strong style="color:var(--c-text);">'+money(d.my_year_contributed||0)+'</strong> in '+year+'</div>'
     : '';
+
+  // "See members" button — pinned to the top-right corner of the hero
+  // card. Same accent treatment as the FAB so the two member actions
+  // feel like a set. Opens a modal listing every club member with
+  // admin/treasurer badges; emails are hidden for privacy.
+  var seeMembersBtn =
+    '<button id="md-see-members" type="button" '+
+      'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
+      'align-items:center;gap:6px;padding:8px 12px;border-radius:999px;'+
+      'background:var(--c-tint);color:#fff;border:none;font-size:12px;'+
+      'font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(10,132,255,0.30);">'+
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
+      '<span>See members</span>'+
+    '</button>';
+
   var heroCard =
-    '<div style="background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
-      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">'+
+    '<div style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
+      seeMembersBtn +
+      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:36px;">'+
         // Left — avatar + ring
         '<div style="position:relative;width:168px;height:168px;flex-shrink:0;margin:0 auto;">'+
           ringSvg +
@@ -2770,9 +2915,20 @@ function _renderClubDashboardMember(d, t, el){
       '</div>';
   }
 
-  // ---- Recent activity (compact, last 5) -----------------------
+  // ---- Recent activity — STRICTLY PERSONAL ---------------------------
+  // Pull only events the caller participated in: their own paid dues,
+  // their own pool inflows, and their own expenses. Backend `recent`
+  // returns a global feed, so we filter client-side by directory id /
+  // actor name. For dues_paid the actor IS the member; for pool_in the
+  // actor is whoever paid; for expense the actor is the payer.
+  var personalEvents = (d.recent || []).filter(function(ev){
+    // Best signal we have on the global feed is the actor display name —
+    // match it against the caller's display name.
+    if(meName && ev.actor === meName) return true;
+    return false;
+  });
   var recentRows = '';
-  (d.recent || []).slice(0, 5).forEach(function(ev){
+  personalEvents.slice(0, 5).forEach(function(ev){
     var sign, color, lbl;
     if(ev.kind === 'expense'){
       sign = '-'; color = '#ff453a';
@@ -2790,7 +2946,7 @@ function _renderClubDashboardMember(d, t, el){
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
         '<div style="min-width:0;">'+
           '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
-          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+(when?when:'')+'</div>'+
         '</div>'+
         '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
       '</div>';
@@ -2798,13 +2954,30 @@ function _renderClubDashboardMember(d, t, el){
   if(!recentRows){
     recentRows = '<div style="padding:18px 0;text-align:center;color:var(--c-text-3);font-size:13px;">No activity yet.</div>';
   }
+  // "View all activity" link below the recent list — opens a modal with
+  // the caller's full current-year feed (server-side, more reliable than
+  // the limited `recent` payload).
+  var viewAllLink =
+    '<div style="padding:10px 0 4px;text-align:center;border-top:1px solid var(--c-border);margin-top:4px;">'+
+      '<a href="#" id="md-view-all-activity" style="font-size:13px;color:var(--c-tint);text-decoration:none;font-weight:600;">View all activity →</a>'+
+    '</div>';
   var recentCard =
     '<div style="background:var(--c-card);border-radius:var(--r);padding:6px 16px 12px;">'+
       '<div style="padding:14px 0 4px;font-size:13px;font-weight:700;">Recent activity</div>'+
       recentRows +
+      viewAllLink +
     '</div>';
 
   el.innerHTML = heroCard + statusCard + recentCard;
+
+  // Wire the See Members button and View all activity link.
+  var sm = $('md-see-members');
+  if(sm) sm.onclick = openSeeMembersModal;
+  var va = $('md-view-all-activity');
+  if(va) va.onclick = function(ev){
+    ev.preventDefault();
+    openMyYearActivityModal();
+  };
 }
 
 // Helper: build a 12-segment ring as inline SVG. Each segment is one
@@ -2870,6 +3043,227 @@ function _ringLegendItem(color, label, muted){
     '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';opacity:'+op+';"></span>'+
     esc(label) + '</span>';
 }
+
+// ============================================================
+//  MEMBER ACTIONS — chooser + See Members + View Activity +
+//  I-paid-dues claim
+// ============================================================
+
+// Opens the small chooser sheet that the member sees when they tap the
+// "+" FAB on their dashboard. Two paths: log a personal expense
+// (re-uses the trip expense modal), or claim a dues payment (new flow).
+function openMemberAction(){
+  openModal('modal-member-action');
+}
+function memberPickAddExpense(){
+  closeModal('modal-member-action');
+  setTimeout(function(){ openExpenseModal(null); }, 180);
+}
+function memberPickPaidDues(){
+  closeModal('modal-member-action');
+  setTimeout(openMyDuesClaim, 180);
+}
+
+// "See members" sheet for members. Names + admin/treasurer badges, no
+// emails. Renders directly from state.trip.members so no extra RPC call.
+function openSeeMembersModal(){
+  var t = state.trip;
+  var members = (t.members || []).slice();
+  // Inactive last; alphabetical within each group.
+  function byName(a, b){
+    return (displayName(a)||'').toLowerCase().localeCompare(
+           (displayName(b)||'').toLowerCase());
+  }
+  var active   = members.filter(function(m){ return !m.is_inactive; }).sort(byName);
+  var inactive = members.filter(function(m){ return  m.is_inactive; }).sort(byName);
+
+  function rowHtml(m){
+    var name = displayName(m);
+    var badges = '';
+    if(m.is_admin || m.is_global_admin){
+      badges += '<span style="font-size:10px;font-weight:700;color:var(--c-tint);'+
+                'background:rgba(10,132,255,0.12);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Admin</span>';
+    }
+    if(m.is_treasurer){
+      badges += '<span style="font-size:10px;font-weight:700;color:#7c5cff;'+
+                'background:rgba(124,92,255,0.12);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Treasurer</span>';
+    }
+    if(m.is_inactive){
+      badges += '<span style="font-size:10px;font-weight:700;color:var(--c-text-3);'+
+                'background:var(--c-bg);padding:2px 6px;border-radius:6px;'+
+                'margin-left:6px;">Inactive</span>';
+    }
+    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;'+
+      'border-bottom:0.5px solid var(--c-border);'+
+      (m.is_inactive?'opacity:0.55;':'')+'">'+
+      '<div class="person-avatar" style="width:32px;height:32px;font-size:13px;">'+
+        esc(initials(m))+'</div>'+
+      '<div style="flex:1;min-width:0;display:flex;align-items:center;flex-wrap:wrap;font-size:14px;">'+
+        esc(name) + badges +
+      '</div>'+
+    '</div>';
+  }
+  var html = '<div style="font-size:12px;color:var(--c-text-3);margin-bottom:8px;">'+
+    members.length + ' member' + (members.length===1?'':'s') +
+    (inactive.length ? ', '+inactive.length+' inactive' : '') + '</div>';
+  active.forEach(function(m){ html += rowHtml(m); });
+  if(inactive.length){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+            'text-transform:uppercase;letter-spacing:0.6px;margin:14px 0 4px;">Inactive</div>';
+    inactive.forEach(function(m){ html += rowHtml(m); });
+  }
+  $('sm-body').innerHTML = html;
+  openModal('modal-see-members');
+}
+
+// "View all activity" modal — strictly personal feed for the year.
+async function openMyYearActivityModal(){
+  openModal('modal-my-activity');
+  $('mya-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_my_year_activity', { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var items = res.data || [];
+    if(items.length === 0){
+      $('mya-body').innerHTML =
+        '<div class="empty"><div class="empty-title">No activity yet</div>'+
+        '<div class="empty-sub">Your personal events for this year will show up here.</div></div>';
+      return;
+    }
+    var html = '';
+    items.forEach(function(ev){
+      var sign, color, lbl;
+      if(ev.kind === 'expense'){
+        sign = '-'; color = '#ff453a';
+        lbl = ev.description || 'Expense';
+      } else if(ev.kind === 'pool_in'){
+        sign = '+'; color = '#30d158';
+        lbl = ev.description || _clubCategoryLabel(ev.category);
+      } else {
+        sign = '+'; color = '#30d158';
+        lbl = 'Dues paid' + (ev.period_label ? ' — ' + ev.period_label : '');
+      }
+      var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
+        {month:'short', day:'numeric', year:'numeric'}) : '';
+      html +=
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:0.5px solid var(--c-border);">'+
+          '<div style="min-width:0;flex:1;">'+
+            '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+            '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(when)+'</div>'+
+          '</div>'+
+          '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+        '</div>';
+    });
+    $('mya-body').innerHTML = html;
+  }catch(err){
+    $('mya-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+// "I paid dues" claim flow. Fetches the caller's unpaid/partial dues
+// rows, lets them pick which month + amount + optional note, and
+// submits via submit_dues_payment_claim. Admin/treasurer see it as a
+// notification and approving runs mark_dues_paid automatically.
+state.duesClaim = null;
+async function openMyDuesClaim(){
+  openModal('modal-dues-claim');
+  $('dc-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  $('dc-submit').disabled = true;
+  $('dc-msg').className = 'msg';
+  try{
+    // Re-fetch the dashboard so my_unpaid_periods is fresh (it also has
+    // dues_id on each row, which we need for submit).
+    var res = await sb.rpc('get_club_dashboard', { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    // We need dues_id, which the dashboard payload exposes via my_dues
+    // (current month only) — for older months we also need the row.
+    // Pull the full member matrix limited to my own directory_id via
+    // get_club_dues_matrix(1 row × 12 months) and pick mine.
+    var mxr = await sb.rpc('get_club_dues_matrix',
+      { p_trip: state.trip.trip_id, p_months: 12 });
+    if(mxr.error) throw mxr.error;
+    var t = state.trip;
+    var meMember = (t.members||[]).filter(function(m){ return m.is_me; })[0];
+    var myDir = (meMember && meMember.directory_id) || t.my_directory_id || null;
+    var unpaid = ((mxr.data && mxr.data.dues) || []).filter(function(r){
+      return r.directory_id === myDir && r.status !== 'paid';
+    }).sort(function(a,b){ return a.period < b.period ? 1 : -1; });
+    if(unpaid.length === 0){
+      $('dc-body').innerHTML =
+        '<div class="empty"><div class="empty-title">All caught up</div>'+
+        '<div class="empty-sub">You have no unpaid months right now. Nice!</div></div>';
+      return;
+    }
+    // Build a select with one option per unpaid row.
+    var opts = '<option value="">— Pick a month —</option>';
+    unpaid.forEach(function(r){
+      var label = (new Date(r.period+'T00:00:00Z')).toLocaleString(undefined,
+        {month:'long', year:'numeric', timeZone:'UTC'});
+      var remaining = (Number(r.amount)||0) - (Number(r.paid_amount)||0);
+      opts += '<option value="'+esc(r.dues_id)+'" data-amt="'+remaining+
+        '" data-label="'+esc(label)+'">'+esc(label)+' — '+money(remaining)+'</option>';
+    });
+    $('dc-body').innerHTML =
+      '<div style="font-size:12.5px;color:var(--c-text-2);line-height:1.5;margin-bottom:14px;">'+
+        'Pick the month you paid for. Your treasurer or admin will be notified to confirm — '+
+        'once they approve, your dues will be marked paid automatically.'+
+      '</div>'+
+      '<label for="dc-month">Month</label>'+
+      '<select id="dc-month" class="field">'+opts+'</select>'+
+      '<label for="dc-amount" style="margin-top:14px;">Amount paid ($)</label>'+
+      '<input type="number" id="dc-amount" class="field" min="0" step="0.01">'+
+      '<div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">'+
+        'Defaults to the full balance for the picked month. Edit if you only paid part of it.'+
+      '</div>'+
+      '<label for="dc-note" style="margin-top:14px;">Note (optional)</label>'+
+      '<input type="text" id="dc-note" class="field" maxlength="200" placeholder="e.g. Venmo on May 18">';
+    // When the month changes, default the amount to that row's balance.
+    $('dc-month').addEventListener('change', function(){
+      var o = $('dc-month').selectedOptions[0];
+      if(o && o.dataset.amt){
+        $('dc-amount').value = Number(o.dataset.amt).toFixed(2);
+      }else{
+        $('dc-amount').value = '';
+      }
+      $('dc-submit').disabled = !o || !o.value;
+    });
+  }catch(err){
+    $('dc-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+async function submitMyDuesClaim(){
+  var sel = $('dc-month');
+  var duesId = sel ? sel.value : '';
+  var amt    = parseFloat($('dc-amount').value);
+  var note   = ($('dc-note').value || '').trim() || null;
+  function setMsg(t){ $('dc-msg').className='msg show err'; $('dc-msg').textContent=t; }
+  if(!duesId){ setMsg('Pick a month.'); return; }
+  if(!(amt > 0)){ setMsg('Enter the amount you paid.'); return; }
+  var btn = $('dc-submit');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  try{
+    var res = await sb.rpc('submit_dues_payment_claim', {
+      p_dues_id: duesId, p_amount: amt, p_note: note
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-dues-claim');
+    toast('Claim submitted — your admin will review it');
+    // Refresh the dashboard so any subsequent decision (or even just the
+    // pending claim's presence) is reflected.
+    state.clubDashboardLoadedFor = null;
+    renderClubDashboardTab();
+  }catch(err){
+    setMsg(err.message || 'Could not submit.');
+  }
+  btn.disabled = false; btn.textContent = 'Submit claim';
+}
+
 
 // ============================================================
 //  ADMIN DASHBOARD (unchanged for now — Step B will redesign).
@@ -6718,6 +7112,7 @@ function renderNotifs(){
     var isResolved = isRejected || isApproved;
     var isLeave = (r.request_type === 'leave');
     var isMakeAdmin = (r.request_type === 'make_admin');
+    var isDuesClaim = (r.request_type === 'dues_payment_claim');
     var headTxt;
     if(isLeave){
       headTxt = isRejected ? 'Leave request declined'
@@ -6727,6 +7122,10 @@ function renderNotifs(){
       headTxt = isRejected ? 'Admin nomination declined'
               : isApproved ? 'Admin nomination accepted'
               : 'Admin nomination';
+    }else if(isDuesClaim){
+      headTxt = isRejected ? 'Dues claim declined'
+              : isApproved ? 'Dues claim approved'
+              : 'Dues payment claim';
     }
     h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'">'+
       '<div class="notif-head">'+headTxt+'</div>'+
@@ -6742,6 +7141,21 @@ function renderNotifs(){
         h += '<div class="notif-title">Waiting for '+esc(r.target_name)+' to accept</div>';
       }else{
         h += '<div class="notif-title">'+esc(r.target_name)+' as admin</div>';
+      }
+    }else if(isDuesClaim){
+      // Caller is the admin/treasurer: "Mehmet says they paid $25 for May 2026".
+      // Caller is the member who submitted: "Waiting for admin to approve".
+      var amt = (r.requested_amount != null) ? money(Number(r.requested_amount)||0) : '';
+      var monthLbl = r.dues_period_label || '';
+      if(r.initiated_by_me){
+        h += '<div class="notif-title">Waiting for admin to confirm your '+esc(monthLbl)+' payment</div>';
+      } else {
+        h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
+             ' says they paid '+amt+
+             (monthLbl ? ' for '+esc(monthLbl) : '')+'</div>';
+      }
+      if(r.note){
+        h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
       }
     }
     if(isRejected && r.rejection_reason){
@@ -7320,6 +7734,14 @@ $('nt-name').addEventListener('keydown',function(e){
 $('acc-close').onclick=function(){ closeModal('modal-account'); };
 $('acc-signout').onclick=doSignOut;
 $('acc-recycle').onclick=openRecycleBin;
+// ---- Member-flow modal wiring -----------------------------------------
+$('ma-cancel').onclick      = function(){ closeModal('modal-member-action'); };
+$('ma-pick-expense').onclick= memberPickAddExpense;
+$('ma-pick-dues').onclick   = memberPickPaidDues;
+$('sm-close').onclick       = function(){ closeModal('modal-see-members'); };
+$('mya-close').onclick      = function(){ closeModal('modal-my-activity'); };
+$('dc-cancel').onclick      = function(){ closeModal('modal-dues-claim'); };
+$('dc-submit').onclick      = submitMyDuesClaim;
 // Trip-switcher (header trip name dropdown)
 $('td-name').onclick = openTripSwitcher;
 $('ts-close').onclick = function(){ closeModal('modal-trip-switch'); };
@@ -7340,7 +7762,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-member-action','modal-see-members','modal-my-activity','modal-dues-claim','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
