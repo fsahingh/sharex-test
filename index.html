@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.14">
+<meta name="app-version" content="V2-CLUB.15">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1603,6 +1603,46 @@
   </div>
 </div>
 
+<!-- ======================= CLUB-WIDE ACTIVITY MODAL ===================
+     Admin/treasurer "View all activity" feed. Filterable by category
+     (All / Paid Dues / Expenses / Donations / Rentals / Pool In /
+     Member / Member Actions). When "Member" is chosen, a second
+     dropdown surfaces so the admin can pick which member's events to
+     see. Member Actions is a placeholder until the audit-log layer
+     lands. -->
+<div class="modal" id="modal-club-activity" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:88vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Club activity</div>
+    <div class="modal-body" id="ca-body-wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="flex:1;min-width:140px;">
+          <label for="ca-filter" style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Filter by</label>
+          <select id="ca-filter" class="field" style="padding:9px 12px;min-height:auto;font-size:14px;">
+            <option value="all">View all</option>
+            <option value="member">Member…</option>
+            <option value="paid_dues">Paid Dues</option>
+            <option value="expense">Expenses</option>
+            <option value="donation">Donations</option>
+            <option value="rental">Rentals</option>
+            <option value="pool_in">Pool In</option>
+            <option value="member_actions">Member Actions</option>
+          </select>
+        </div>
+        <div id="ca-member-wrap" style="flex:1;min-width:140px;" hidden>
+          <label for="ca-member" style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Member</label>
+          <select id="ca-member" class="field" style="padding:9px 12px;min-height:auto;font-size:14px;"></select>
+        </div>
+      </div>
+      <div id="ca-body" style="min-height:120px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ca-close" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= I PAID DUES MODAL =========================
      Member-side claim form: pick an unpaid month, amount, optional note.
      Submission lands in the admin's notification bell. -->
@@ -1688,7 +1728,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.14';
+var APP_VERSION = 'V2-CLUB.15';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3503,6 +3543,164 @@ async function openMyYearActivityModal(){
   }
 }
 
+// =====================================================================
+//  CLUB-WIDE ACTIVITY MODAL (admin / treasurer)
+//  Filterable by category and/or member. "Member Actions" is a
+//  placeholder for the upcoming audit-log layer; selecting it shows
+//  a "Coming soon" empty state so the menu surface stays complete.
+// =====================================================================
+state.clubActivityFilter = 'all';
+state.clubActivityMemberDir = null;
+
+function openClubActivityModal(){
+  state.clubActivityFilter = 'all';
+  state.clubActivityMemberDir = null;
+  // Reset UI controls — the modal reopens fresh every time, the
+  // previous filter shouldn't carry over silently.
+  $('ca-filter').value = 'all';
+  hide('ca-member-wrap');
+  $('ca-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  // Populate the member sub-dropdown once; cheap on every open since
+  // state.trip.members is already in memory.
+  _populateClubActivityMembers();
+  openModal('modal-club-activity');
+  _refreshClubActivity();
+}
+
+function _populateClubActivityMembers(){
+  var sel = $('ca-member');
+  var members = (state.trip && state.trip.members || []).slice();
+  // Alphabetical, inactives marked but still selectable so the admin
+  // can audit former participants.
+  members.sort(function(a,b){
+    return (displayName(a)||'').toLowerCase().localeCompare(
+           (displayName(b)||'').toLowerCase());
+  });
+  var html = '<option value="">— Pick a member —</option>';
+  members.forEach(function(m){
+    var nm = displayName(m) + (m.is_inactive ? ' (inactive)' : '');
+    html += '<option value="'+esc(m.directory_id)+'">'+esc(nm)+'</option>';
+  });
+  sel.innerHTML = html;
+}
+
+async function _refreshClubActivity(){
+  var filter = state.clubActivityFilter || 'all';
+  var memberDir = state.clubActivityMemberDir;
+
+  // Placeholder: Member Actions audit log isn't wired up yet — show
+  // a friendly "coming soon" message so the menu surface doesn't
+  // dead-end on an empty list.
+  if(filter === 'member_actions'){
+    $('ca-body').innerHTML =
+      '<div class="empty" style="padding:30px 12px;">'+
+        '<div class="empty-title">Coming soon</div>'+
+        '<div class="empty-sub" style="line-height:1.5;">Member actions '+
+        '(joins, withdrawals, role changes) will appear here once the '+
+        'audit log is enabled.</div>'+
+      '</div>';
+    return;
+  }
+
+  // If the filter is "member" we wait for the picker before hitting
+  // the RPC — without a directory id the result would be the full
+  // club feed, which contradicts the user's selection.
+  if(filter === 'member' && !memberDir){
+    $('ca-body').innerHTML =
+      '<div style="text-align:center;color:var(--c-text-3);font-size:13px;padding:30px 12px;line-height:1.5;">'+
+      'Pick a member from the dropdown to see their activity.</div>';
+    return;
+  }
+
+  $('ca-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_club_activity', {
+      p_trip:       state.trip.trip_id,
+      p_filter:     filter,
+      p_filter_dir: memberDir || null,
+      p_limit:      100
+    });
+    if(res.error) throw res.error;
+    _renderClubActivityList((res.data && res.data.items) || []);
+  }catch(err){
+    $('ca-body').innerHTML =
+      '<div class="empty" style="padding:30px 12px;">'+
+        '<div class="empty-title">Could not load</div>'+
+        '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+function _renderClubActivityList(items){
+  if(!items || items.length === 0){
+    $('ca-body').innerHTML =
+      '<div style="text-align:center;color:var(--c-text-3);font-size:13px;padding:30px 12px;">'+
+      'No matching activity.</div>';
+    return;
+  }
+  // Group rows by date so a long feed reads at a glance — same shape
+  // as the trip Expenses tab uses. The label is the local-date for the
+  // row; today and yesterday get friendly names.
+  var byDay = {};
+  var dayOrder = [];
+  items.forEach(function(ev){
+    var d = ev.at ? new Date(ev.at) : null;
+    var key = d ? d.toISOString().slice(0,10) : '—';
+    if(!byDay[key]){ byDay[key] = { label: _activityDayLabel(d), rows: [] }; dayOrder.push(key); }
+    byDay[key].rows.push(ev);
+  });
+  var html = '';
+  dayOrder.forEach(function(key){
+    var group = byDay[key];
+    html += '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);'+
+      'text-transform:uppercase;letter-spacing:0.6px;padding:14px 2px 4px;">'+
+      esc(group.label) + '</div>';
+    group.rows.forEach(function(ev){
+      html += _activityRowHtml(ev);
+    });
+  });
+  $('ca-body').innerHTML = html;
+}
+
+function _activityDayLabel(d){
+  if(!d || isNaN(d.getTime())) return '—';
+  var today = new Date();
+  var midToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  var midThat  = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  var diffDays = Math.round((midToday - midThat) / 86400000);
+  if(diffDays === 0) return 'Today';
+  if(diffDays === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric',
+    year: (d.getFullYear() === today.getFullYear() ? undefined : 'numeric') });
+}
+
+function _activityRowHtml(ev){
+  var sign, color, lbl, sub;
+  if(ev.kind === 'expense'){
+    sign = '-'; color = '#ff453a';
+    lbl = ev.description || 'Expense';
+    sub = 'Paid by ' + (ev.actor || '—');
+  } else if(ev.kind === 'pool_in'){
+    sign = '+'; color = '#30d158';
+    lbl = ev.description || _clubCategoryLabel(ev.category);
+    sub = 'From ' + (ev.actor || '—');
+  } else {
+    sign = '+'; color = '#30d158';
+    lbl = 'Dues paid';
+    sub = (ev.actor || '—') + ' &middot; ' + (ev.period_label || '');
+  }
+  var when = ev.at ? new Date(ev.at).toLocaleTimeString(undefined,
+    { hour:'numeric', minute:'2-digit' }) : '';
+  return '<div style="display:flex;align-items:center;justify-content:space-between;'+
+    'gap:10px;padding:10px 4px;border-top:1px solid var(--c-border);">'+
+    '<div style="min-width:0;flex:1;">'+
+      '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+      '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+sub+(when?' &middot; '+when:'')+'</div>'+
+    '</div>'+
+    '<div style="font-size:14px;font-weight:700;color:'+color+';white-space:nowrap;">'+
+      sign+money(ev.amount||0)+'</div>'+
+  '</div>';
+}
+
 // "I paid dues" claim flow. Fetches the caller's unpaid/partial dues
 // rows, lets them pick which month + amount + optional note, and
 // submits via submit_dues_payment_claim. Admin/treasurer see it as a
@@ -3844,15 +4042,12 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   if(kebabBtn){
     kebabBtn.onclick = function(){ openClubKebabMenu(kebabBtn); };
   }
-  // 6. View-all activity link (placeholder until Faz D).
+  // 6. View-all activity link → club-wide filtered feed (Faz D).
   var va = $('club-view-all-activity');
   if(va){
     va.onclick = function(ev){
       ev.preventDefault();
-      // Re-use the personal activity modal until Faz D ships the
-      // club-wide filtered feed. Better than dead-ending the link.
-      if(typeof openMyYearActivity === 'function') openMyYearActivity();
-      else toast('Coming soon');
+      openClubActivityModal();
     };
   }
 }
@@ -8550,6 +8745,23 @@ $('ma-pick-expense').onclick= memberPickAddExpense;
 $('ma-pick-dues').onclick   = memberPickPaidDues;
 $('sm-close').onclick       = function(){ closeModal('modal-see-members'); };
 $('mya-close').onclick      = function(){ closeModal('modal-my-activity'); };
+
+// Club-wide activity modal — close + filter handlers. The filter
+// dropdown surfaces / hides the member sub-picker and reloads the
+// feed on every change so the list always matches the controls.
+$('ca-close').onclick  = function(){ closeModal('modal-club-activity'); };
+$('ca-filter').onchange = function(){
+  state.clubActivityFilter = $('ca-filter').value;
+  // Member sub-picker only appears for the "member" filter mode.
+  var showMember = (state.clubActivityFilter === 'member');
+  if(showMember){ show('ca-member-wrap'); }
+  else { hide('ca-member-wrap'); state.clubActivityMemberDir = null; $('ca-member').value = ''; }
+  _refreshClubActivity();
+};
+$('ca-member').onchange = function(){
+  state.clubActivityMemberDir = $('ca-member').value || null;
+  _refreshClubActivity();
+};
 $('dc-cancel').onclick      = function(){ closeModal('modal-dues-claim'); };
 $('dc-submit').onclick      = submitMyDuesClaim;
 // Trip-switcher (header trip name dropdown)
@@ -8572,7 +8784,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-member-action','modal-see-members','modal-my-activity','modal-dues-claim','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-member-action','modal-see-members','modal-my-activity','modal-club-activity','modal-dues-claim','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
