@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.9">
+<meta name="app-version" content="V2-CLUB.10">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1688,7 +1688,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.9';
+var APP_VERSION = 'V2-CLUB.10';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -7626,11 +7626,25 @@ document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b)
       bb.style.color       = on ? '#fff'           : 'var(--c-text)';
       bb.style.borderColor = on ? 'var(--c-tint)'  : 'var(--c-border)';
     });
-    // If a club dashboard is currently visible, re-render it so the
-    // change is felt immediately. clubDashboard data is already cached
-    // (the RPC payload doesn't depend on the viewer's role), so we just
-    // route through the dispatcher.
-    if(state.trip && state.trip.kind === 'club' && state.activeTab === 'dashboard'){
+    // Full club-view reflow. The tab bar, the active tab, and the FAB
+    // all depend on the *effective* role. Without this, the dashboard
+    // panel re-renders into member layout but the tab strip stays
+    // visible — leaking admin-only surfaces. We mirror the same logic
+    // openTripInternal runs when it first decides what to show, so a
+    // chip flip is indistinguishable from a real page load.
+    if(state.trip && state.trip.kind === 'club'){
+      var effIsAdmin = !!(state.trip.is_admin || state.is_treasurer);
+      var isGA = !!(state.profile && state.profile.is_global_admin);
+      if(isGA && getClubViewAs() === 'member') effIsAdmin = false;
+      if(effIsAdmin){
+        show('tabs-club');
+        // Keep the user on whatever tab they were viewing.
+      } else {
+        // Member-only experience: dashboard is the only surface.
+        state.activeTab = 'dashboard';
+        hide('tabs-club');
+      }
+      setActiveTab(state.activeTab);
       _renderClubDashboardFromState();
     }
     toast('Viewing as ' + b.dataset.viewas);
