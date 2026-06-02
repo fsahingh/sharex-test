@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.10">
+<meta name="app-version" content="V2-CLUB.11">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1688,7 +1688,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.10';
+var APP_VERSION = 'V2-CLUB.11';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2306,6 +2306,7 @@ async function openTripInternal(tripId, tab){
   state.settlementLoadedFor = null;
   state.clubDashboardLoadedFor = null;
   state.is_treasurer = false;
+  state.adminClubView = 'club';   // reset admin sub-view on every trip open
   setActiveTab(state.activeTab);
   $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   $('tab-expenses').innerHTML='';
@@ -2771,11 +2772,70 @@ function _renderClubDashboardFromState(){
     else if(viewAs === 'treasurer') isAdmin = true;   // treasurer == admin layout in Phase 1
     // 'admin' (or default): leave isAdmin as-is
   }
+  // Default the admin sub-view to "club" on first render. The chip bar
+  // below lets the admin toggle between the club-wide overview and a
+  // personal profile view that mirrors what regular members see. We
+  // keep the state on the global state object so a re-render from a
+  // refresh (or viewAs flip) doesn't lose the user's place.
+  if(!state.adminClubView) state.adminClubView = 'club';
+
   if(isAdmin){
-    _renderClubDashboardAdmin(d, t, el);
+    // Pick whichever sub-view is selected. The 3-button bar gets
+    // prepended after the render so its DOM ordering stays predictable.
+    if(state.adminClubView === 'my_profile'){
+      _renderClubDashboardMember(d, t, el);
+    } else {
+      _renderClubDashboardAdmin(d, t, el);
+    }
+    el.insertAdjacentHTML('afterbegin', _renderAdminClubChipBar(state.adminClubView));
+    _wireAdminClubChipBar();
   } else {
+    // Members never see the chip bar — they have one surface only.
     _renderClubDashboardMember(d, t, el);
   }
+}
+
+// Renders the three-chip switcher that sits at the top of the GA &
+// Treasurer Dashboard. Club and My Profile flip between the two
+// dashboard layouts in place; See Members opens the existing modal so
+// it doesn't need its own render path.
+function _renderAdminClubChipBar(active){
+  function chip(key, label, isAction){
+    var on = (active === key);
+    var bg     = on ? 'var(--c-tint)'    : 'var(--c-card)';
+    var color  = on ? '#fff'             : 'var(--c-text)';
+    var border = on ? 'var(--c-tint)'    : 'var(--c-border)';
+    // The See Members chip never shows the selected state (it's a
+    // momentary action), but we keep the same shape for visual rhythm.
+    if(isAction){ bg = 'var(--c-card)'; color = 'var(--c-text)'; border = 'var(--c-border)'; }
+    return '<button type="button" data-admin-club-view="'+key+'" '+
+      'style="flex:1;min-width:0;padding:9px 8px;border-radius:var(--r-sm);'+
+      'font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+border+';'+
+      'background:'+bg+';color:'+color+';white-space:nowrap;'+
+      'overflow:hidden;text-overflow:ellipsis;">'+esc(label)+'</button>';
+  }
+  return '<div id="admin-club-chip-bar" style="display:flex;gap:6px;margin-bottom:14px;">'+
+    chip('club',       'Club') +
+    chip('my_profile', 'My Profile') +
+    chip('see_members','See Members', true) +
+    '</div>';
+}
+function _wireAdminClubChipBar(){
+  document.querySelectorAll('#admin-club-chip-bar [data-admin-club-view]').forEach(function(b){
+    b.onclick = function(){
+      var v = b.dataset.adminClubView;
+      if(v === 'see_members'){
+        // The See Members modal lives independently — it's an action,
+        // not a view switch, so the chip bar's "active" state doesn't
+        // change when it's tapped.
+        if(typeof openSeeMembersModal === 'function') openSeeMembersModal();
+        return;
+      }
+      if(state.adminClubView === v) return;   // no-op if already there
+      state.adminClubView = v;
+      _renderClubDashboardFromState();
+    };
+  });
 }
 
 // ============================================================
@@ -7626,6 +7686,12 @@ document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b)
       bb.style.color       = on ? '#fff'           : 'var(--c-text)';
       bb.style.borderColor = on ? 'var(--c-tint)'  : 'var(--c-border)';
     });
+    // Role flip resets the admin sub-view: a freshly-arrived "admin" or
+    // "treasurer" should land on the Club overview, not whatever the
+    // last admin session was looking at. Without this, switching from
+    // member→admin would leave them stuck on whichever screen the chip
+    // bar was last set to.
+    state.adminClubView = 'club';
     // Full club-view reflow. The tab bar, the active tab, and the FAB
     // all depend on the *effective* role. Without this, the dashboard
     // panel re-renders into member layout but the tab strip stays
