@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.12">
+<meta name="app-version" content="V2-CLUB.13">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1688,7 +1688,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.12';
+var APP_VERSION = 'V2-CLUB.13';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2786,7 +2786,14 @@ function _renderClubDashboardFromState(){
     // the fact. The two sub-renderers know how to place it at the top
     // of their own hero card so it visually belongs to the user, not
     // a stray strip floating above.
-    var chipBarHtml = _renderAdminClubChipBar(state.adminClubView);
+    //
+    // The kebab (...) menu also sits on the same row to avoid the
+    // overlap it used to cause when it was free-positioned in the
+    // top-right corner of the card. Only Club view gets the kebab;
+    // My Profile has no admin actions of its own (yet).
+    var kebabHtml = (state.adminClubView === 'club') ? _renderClubKebabBtn() : '';
+    var chipBarHtml = _renderAdminClubChipBar(state.adminClubView,
+      { kebabHtml: kebabHtml });
     if(state.adminClubView === 'my_profile'){
       // In the admin's personal-profile view we hide the duplicate
       // "See Members" button that the member layout otherwise places
@@ -2806,11 +2813,36 @@ function _renderClubDashboardFromState(){
   }
 }
 
+// Unified ring sizing — both member and admin layouts go through this
+// so the two views feel like the same component at different scales.
+// Mobile gets a smaller ring to leave breathing room for the side
+// info panel without forcing a wrap (which used to push the right
+// column under the ring on phones).
+function _clubRingSize(){
+  return (typeof window !== 'undefined' && window.innerWidth < 480) ? 200 : 240;
+}
+
+// Kebab button HTML — emitted inline so the chip bar can host it as a
+// regular flex item rather than an absolutely-positioned overlay. The
+// element gets wired up in _renderClubDashboardAdmin.
+function _renderClubKebabBtn(){
+  return '<button id="club-kebab" type="button" '+
+      'style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;'+
+      'width:36px;height:36px;border-radius:10px;background:transparent;'+
+      'border:1px solid var(--c-border);color:var(--c-text);cursor:pointer;" '+
+      'title="Club actions">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">'+
+        '<circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>'+
+      '</svg>'+
+    '</button>';
+}
+
 // Renders the three-chip switcher that sits *inside* the hero card —
 // pinned to the top so the user can flip between Club and My Profile
 // without leaving their visual anchor (the avatar + ring). The third
 // chip is See Members which opens its own modal.
-function _renderAdminClubChipBar(active){
+function _renderAdminClubChipBar(active, opts){
+  opts = opts || {};
   function chip(key, label, isAction){
     var on = (active === key);
     var bg     = on ? 'var(--c-tint)'    : 'transparent';
@@ -2826,10 +2858,11 @@ function _renderAdminClubChipBar(active){
       'overflow:hidden;text-overflow:ellipsis;transition:.15s;">'+esc(label)+'</button>';
   }
   return '<div id="admin-club-chip-bar" '+
-    'style="display:flex;gap:6px;margin-bottom:16px;">'+
+    'style="display:flex;gap:6px;margin-bottom:16px;align-items:stretch;">'+
     chip('club',       'Club') +
     chip('my_profile', 'My Profile') +
     chip('see_members','See Members', true) +
+    (opts.kebabHtml || '') +
     '</div>';
 }
 function _wireAdminClubChipBar(){
@@ -2885,8 +2918,16 @@ function _renderClubDashboardMember(d, t, el, opts){
 
   // ---- The ring is rendered as an SVG so we get clean curved
   // segments with 3-letter month labels on the outside. Each month is
-  // a 30° arc with a small gap between segments. ----
-  var ringSvg = _renderYearRingSvg(months, 200, 14, 4, { showLabels:true });
+  // a 30° arc with a small gap between segments. ---- Unified sizing
+  // with the admin Club view via _clubRingSize() — phones get 200,
+  // desktop gets 240. The two layouts feel like the same component
+  // at different scales.
+  var ringSize = _clubRingSize();
+  var ringStroke = (ringSize >= 240) ? 16 : 14;
+  var ringSvg = _renderYearRingSvg(months, ringSize, ringStroke, 4, { showLabels:true });
+  // Centre disc inset scales with the ring so the avatar disc keeps
+  // a consistent visual ratio across both sizes.
+  var discInset = (ringSize >= 240) ? 50 : 42;
 
   // "See members" button — pinned to the top-right corner of the hero
   // card. Same accent treatment as the FAB so the two member actions
@@ -2921,24 +2962,27 @@ function _renderClubDashboardMember(d, t, el, opts){
   //   │                    This month: ...   │
   //   │  ── legend ──                        │
   //   └──────────────────────────────────────┘
+  // Grid layout (not flex+wrap): ring stays on the left, info column
+  // stays on the right at every viewport — phones used to push the
+  // info column under the ring which broke the visual hierarchy.
   var heroCard =
     '<div class="club-hero-card" style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
       (opts.chipBarHtml || '') +
       seeMembersBtn +
-      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;'+
+      '<div style="display:grid;grid-template-columns:'+ringSize+'px 1fr;gap:14px;align-items:center;'+
         // Push content down when the See Members button is overlaid so
         // they don't collide on narrow screens. With chip bar present
         // it isn't needed (chip bar already takes the top row).
         (seeMembersBtn && !opts.chipBarHtml ? 'margin-top:36px;' : '')+'">'+
         // Left — avatar + ring
-        '<div style="position:relative;width:200px;height:200px;flex-shrink:0;margin:0 auto;">'+
+        '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
           ringSvg +
-          '<div style="position:absolute;inset:42px;border-radius:50%;background:var(--c-bg);'+
+          '<div style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
             'display:flex;align-items:center;justify-content:center;'+
             'font-size:36px;font-weight:700;color:var(--c-text);">'+esc(meInitials)+'</div>'+
         '</div>'+
         // Right — personal read-outs
-        '<div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:14px;">'+
+        '<div style="min-width:0;display:flex;flex-direction:column;gap:14px;">'+
           contributionCard +
           '<div>'+
             '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">This month</div>'+
@@ -3420,13 +3464,18 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   var isCurrentSelected = !!(selected && selected.period === d.current_period);
 
   // ---- Ring ----
-  var ringSize = 240;
-  var ringSvg = _renderClubYearRingSvg(months, ringSize, 16, 5,
+  var ringSize = _clubRingSize();
+  // Stroke scales gently with the ring so the segments still read as
+  // bold arcs at 200px on mobile and at 240px on desktop.
+  var ringStroke = (ringSize >= 240) ? 16 : 14;
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 5,
     state.clubSelectedMonth, d.current_period);
   var clubName = t.name || 'Club';
-  // Truncate club names so the centre disc text always fits. 9 chars
-  // is the threshold where the layout still looks balanced at 240px.
+  // Truncate club names so the centre disc text always fits.
   var clubLabel = (clubName.length > 9) ? (clubName.slice(0, 8) + '…') : clubName;
+  // Centre disc inset depends on ring size so the inner circle keeps
+  // a consistent ratio (stroke + padding stays ~constant).
+  var discInset = (ringSize >= 240) ? 46 : 38;
 
   // ---- Right-side info panel ----
   // Stat rows: Pool Balance + Over Dues are year-wide; IN/OUT update
@@ -3472,35 +3521,26 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       unpaidChip +
     '</div>';
 
-  // Kebab menu — pinned top-right of the hero card. Hosts the admin
-  // actions that used to live in the old tab (Z-Report etc.). Hidden
-  // for non-editing viewers so the chrome stays clean.
-  var kebab = canEdit ? (
-    '<button id="club-kebab" type="button" '+
-      'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
-      'align-items:center;justify-content:center;width:34px;height:34px;'+
-      'border-radius:10px;background:transparent;border:1px solid var(--c-border);'+
-      'color:var(--c-text);cursor:pointer;" title="Club actions">'+
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">'+
-        '<circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>'+
-      '</svg>'+
-    '</button>'
-  ) : '';
+  // Kebab is rendered inside the chip bar now (top-row 4th slot), so
+  // there's no absolute-positioned overlay competing with it in the
+  // hero corner — the overlap with See Members is gone.
 
   // Hero card. The chip bar sits at the very top *inside* the card —
   // anchored to the user's primary visual point so it doesn't drift.
+  // Layout under the chip bar uses CSS grid (not flex+wrap) so the
+  // ring stays on the left and the info panel stays on the right at
+  // every viewport — no more "info column drops below ring" on phones.
   var heroCard =
     '<div class="club-hero-card" style="position:relative;background:var(--c-card);'+
         'border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
       (opts.chipBarHtml || '') +
-      kebab +
-      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">'+
+      '<div style="display:grid;grid-template-columns:'+ringSize+'px 1fr;'+
+        'gap:14px;align-items:center;">'+
         // Left — ring + clickable centre disc
-        '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;'+
-              'flex-shrink:0;margin:0 auto;">'+
+        '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
           ringSvg +
           '<button type="button" id="ss-club-centre" '+
-            'style="position:absolute;inset:46px;border-radius:50%;background:var(--c-bg);'+
+            'style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
             'border:'+(isCurrentSelected ? '1px solid var(--c-border)' : '2px solid var(--c-tint)')+
             ';color:var(--c-text);font-family:inherit;cursor:pointer;'+
             'display:flex;flex-direction:column;align-items:center;justify-content:center;'+
@@ -3663,6 +3703,7 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
   var totalSeg = 12;
   var segDeg   = 360 / totalSeg;
   var paths = '';
+  var halos = '';   // animated overlay drawn AFTER the main segments so it sits on top
   var labels = '';
   var MONTH_3 = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   for(var i = 0; i < totalSeg; i++){
@@ -3674,14 +3715,24 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
     // the admin taps a segment we keep its data-driven colour so they
     // can still tell at a glance whether the selected month is healthy.
     var effStatus = m.status;
-    if(isCurrent && !isSelected && (effStatus === 'future')) effStatus = 'current';
     if(isCurrent && !isSelected) effStatus = 'current';  // always blue when live & not selected
     var color = _clubStatusColor(effStatus);
     var startDeg = -90 + (i * segDeg) + (gapDeg/2);
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
+    // Main segment. Selected one is noticeably thicker so even without
+    // the halo it stands out from the rest of the ring.
     paths += _clubArcPath(cx, cy, r, startDeg, endDeg, color,
-      isSelected ? thickness + 4 : thickness,
+      isSelected ? thickness + 6 : thickness,
       m.label_full || '', m.period, m.status, isSelected);
+    // Halo overlay for the selected segment: a second concentric arc
+    // sitting just outside the ring, in the accent colour, with a
+    // synchronised stroke-width + opacity pulse so it reads as a
+    // heartbeat. SMIL is supported in every iOS/Android browser we
+    // target, and the animation runs entirely in the GPU so it costs
+    // nothing perf-wise.
+    if(isSelected){
+      halos += _clubHaloArc(cx, cy, r + thickness/2 + 6, startDeg, endDeg);
+    }
     // 3-letter label outside the ring, midpoint angle, upright text.
     var midDeg = (startDeg + endDeg) / 2;
     var labelR = r + (thickness/2) + 10;
@@ -3700,7 +3751,33 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
         'opacity="'+fade+'" style="pointer-events:none;">'+MONTH_3[i]+'</text>';
   }
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" '+
-    'style="display:block;">'+ paths + labels +'</svg>';
+    'style="display:block;overflow:visible;">'+ paths + halos + labels +'</svg>';
+}
+
+// Halo arc that pulses around the currently-selected segment. Draws a
+// thin tint-coloured stroke just outside the main ring and uses SMIL
+// to oscillate stroke-width + opacity — gives a clear "heartbeat" cue
+// that draws the eye without being distracting.
+function _clubHaloArc(cx, cy, r, startDeg, endDeg){
+  function pt(angleDeg){
+    var a = angleDeg * Math.PI / 180;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  }
+  // Stretch the halo a few degrees beyond the segment endpoints so it
+  // visually "wraps" the selection instead of stopping flush with it.
+  var pad = 2;
+  var p1 = pt(startDeg - pad);
+  var p2 = pt(endDeg + pad);
+  var largeArc = ((endDeg + pad) - (startDeg - pad)) > 180 ? 1 : 0;
+  var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
+  return '<path d="'+d+'" stroke="#0a84ff" stroke-width="3" stroke-linecap="round" '+
+         'fill="none" opacity="0.7" style="pointer-events:none;'+
+         'filter:drop-shadow(0 0 6px rgba(10,132,255,0.6));">'+
+    '<animate attributeName="stroke-width" values="2;6;2" '+
+      'dur="1.4s" repeatCount="indefinite"/>'+
+    '<animate attributeName="opacity" values="0.45;1;0.45" '+
+      'dur="1.4s" repeatCount="indefinite"/>'+
+    '</path>';
 }
 function _clubStatusColor(status){
   return ({
