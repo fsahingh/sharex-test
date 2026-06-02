@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.11">
+<meta name="app-version" content="V2-CLUB.12">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1688,7 +1688,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.11';
+var APP_VERSION = 'V2-CLUB.12';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2307,6 +2307,7 @@ async function openTripInternal(tripId, tab){
   state.clubDashboardLoadedFor = null;
   state.is_treasurer = false;
   state.adminClubView = 'club';   // reset admin sub-view on every trip open
+  state.clubSelectedMonth = null; // reset Faz B month picker
   setActiveTab(state.activeTab);
   $('tab-settlement').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   $('tab-expenses').innerHTML='';
@@ -2780,14 +2781,24 @@ function _renderClubDashboardFromState(){
   if(!state.adminClubView) state.adminClubView = 'club';
 
   if(isAdmin){
-    // Pick whichever sub-view is selected. The 3-button bar gets
-    // prepended after the render so its DOM ordering stays predictable.
+    // The chip bar lives *inside* the hero card now, so we hand it to
+    // the sub-renderer as an HTML blob rather than splicing it after
+    // the fact. The two sub-renderers know how to place it at the top
+    // of their own hero card so it visually belongs to the user, not
+    // a stray strip floating above.
+    var chipBarHtml = _renderAdminClubChipBar(state.adminClubView);
     if(state.adminClubView === 'my_profile'){
-      _renderClubDashboardMember(d, t, el);
+      // In the admin's personal-profile view we hide the duplicate
+      // "See Members" button that the member layout otherwise places
+      // in the top-right of its hero card — the chip bar above already
+      // exposes the same action.
+      _renderClubDashboardMember(d, t, el, {
+        chipBarHtml: chipBarHtml,
+        hideSeeMembersBtn: true
+      });
     } else {
-      _renderClubDashboardAdmin(d, t, el);
+      _renderClubDashboardAdmin(d, t, el, { chipBarHtml: chipBarHtml });
     }
-    el.insertAdjacentHTML('afterbegin', _renderAdminClubChipBar(state.adminClubView));
     _wireAdminClubChipBar();
   } else {
     // Members never see the chip bar — they have one surface only.
@@ -2795,26 +2806,27 @@ function _renderClubDashboardFromState(){
   }
 }
 
-// Renders the three-chip switcher that sits at the top of the GA &
-// Treasurer Dashboard. Club and My Profile flip between the two
-// dashboard layouts in place; See Members opens the existing modal so
-// it doesn't need its own render path.
+// Renders the three-chip switcher that sits *inside* the hero card —
+// pinned to the top so the user can flip between Club and My Profile
+// without leaving their visual anchor (the avatar + ring). The third
+// chip is See Members which opens its own modal.
 function _renderAdminClubChipBar(active){
   function chip(key, label, isAction){
     var on = (active === key);
-    var bg     = on ? 'var(--c-tint)'    : 'var(--c-card)';
+    var bg     = on ? 'var(--c-tint)'    : 'transparent';
     var color  = on ? '#fff'             : 'var(--c-text)';
     var border = on ? 'var(--c-tint)'    : 'var(--c-border)';
     // The See Members chip never shows the selected state (it's a
     // momentary action), but we keep the same shape for visual rhythm.
-    if(isAction){ bg = 'var(--c-card)'; color = 'var(--c-text)'; border = 'var(--c-border)'; }
+    if(isAction){ bg = 'transparent'; color = 'var(--c-text)'; border = 'var(--c-border)'; }
     return '<button type="button" data-admin-club-view="'+key+'" '+
-      'style="flex:1;min-width:0;padding:9px 8px;border-radius:var(--r-sm);'+
+      'style="flex:1;min-width:0;padding:8px 6px;border-radius:10px;'+
       'font-size:12px;font-weight:600;cursor:pointer;border:1px solid '+border+';'+
       'background:'+bg+';color:'+color+';white-space:nowrap;'+
-      'overflow:hidden;text-overflow:ellipsis;">'+esc(label)+'</button>';
+      'overflow:hidden;text-overflow:ellipsis;transition:.15s;">'+esc(label)+'</button>';
   }
-  return '<div id="admin-club-chip-bar" style="display:flex;gap:6px;margin-bottom:14px;">'+
+  return '<div id="admin-club-chip-bar" '+
+    'style="display:flex;gap:6px;margin-bottom:16px;">'+
     chip('club',       'Club') +
     chip('my_profile', 'My Profile') +
     chip('see_members','See Members', true) +
@@ -2845,7 +2857,8 @@ function _wireAdminClubChipBar(){
 //  year. The "Your status" card under it names any unpaid months so
 //  the member can act on them. No admin-only affordances are shown.
 // ============================================================
-function _renderClubDashboardMember(d, t, el){
+function _renderClubDashboardMember(d, t, el, opts){
+  opts = opts || {};
   var months = d.my_year_months || [];
   var year   = d.year || (new Date()).getFullYear();
 
@@ -2871,21 +2884,15 @@ function _renderClubDashboardMember(d, t, el){
   var myDir = (meMember && meMember.directory_id) || t.my_directory_id || null;
 
   // ---- The ring is rendered as an SVG so we get clean curved
-  // segments and crisp scaling. Each month is a 30° arc with a small
-  // gap between segments. Colors come from a status → palette map. ----
-  var ringSvg = _renderYearRingSvg(months, 168, 14, 4);
-
-  // Side column on desktop / stacked column on narrow screens. We use
-  // grid with auto-fit so the layout collapses gracefully.
-  var contributionLine = (d.my_year_contributed != null)
-    ? '<div style="font-size:12px;color:var(--c-text-3);margin-top:2px;">You contributed <strong style="color:var(--c-text);">'+money(d.my_year_contributed||0)+'</strong> in '+year+'</div>'
-    : '';
+  // segments with 3-letter month labels on the outside. Each month is
+  // a 30° arc with a small gap between segments. ----
+  var ringSvg = _renderYearRingSvg(months, 200, 14, 4, { showLabels:true });
 
   // "See members" button — pinned to the top-right corner of the hero
   // card. Same accent treatment as the FAB so the two member actions
-  // feel like a set. Opens a modal listing every club member with
-  // admin/treasurer badges; emails are hidden for privacy.
-  var seeMembersBtn =
+  // feel like a set. Hidden in the admin's "My Profile" preview because
+  // the chip bar above already exposes the same action.
+  var seeMembersBtn = opts.hideSeeMembersBtn ? '' :
     '<button id="md-see-members" type="button" '+
       'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
       'align-items:center;gap:6px;padding:8px 12px;border-radius:999px;'+
@@ -2895,24 +2902,44 @@ function _renderClubDashboardMember(d, t, el){
       '<span>See members</span>'+
     '</button>';
 
+  // Right-column read-outs. Pool Balance is intentionally NOT shown
+  // here — it's a club-level financial fact that the spec restricts to
+  // the Club View (admins/treasurer only). My Profile / member screens
+  // surface personal contribution and the current month label instead.
+  var contributionCard = (d.my_year_contributed != null)
+    ? '<div>'+
+        '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Contributed in '+year+'</div>'+
+        '<div style="font-size:22px;font-weight:800;margin-top:2px;">'+money(d.my_year_contributed||0)+'</div>'+
+      '</div>'
+    : '';
+
+  // Hero card. Layout:
+  //   ┌──────────────────────────────────────┐
+  //   │ [chip bar — admin only]              │  ← opts.chipBarHtml
+  //   │                            [See Members]
+  //   │  [ring + avatar]   Contributed $X    │
+  //   │                    This month: ...   │
+  //   │  ── legend ──                        │
+  //   └──────────────────────────────────────┘
   var heroCard =
-    '<div style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
+    '<div class="club-hero-card" style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
+      (opts.chipBarHtml || '') +
       seeMembersBtn +
-      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:36px;">'+
+      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;'+
+        // Push content down when the See Members button is overlaid so
+        // they don't collide on narrow screens. With chip bar present
+        // it isn't needed (chip bar already takes the top row).
+        (seeMembersBtn && !opts.chipBarHtml ? 'margin-top:36px;' : '')+'">'+
         // Left — avatar + ring
-        '<div style="position:relative;width:168px;height:168px;flex-shrink:0;margin:0 auto;">'+
+        '<div style="position:relative;width:200px;height:200px;flex-shrink:0;margin:0 auto;">'+
           ringSvg +
-          '<div style="position:absolute;inset:28px;border-radius:50%;background:var(--c-bg);'+
+          '<div style="position:absolute;inset:42px;border-radius:50%;background:var(--c-bg);'+
             'display:flex;align-items:center;justify-content:center;'+
             'font-size:36px;font-weight:700;color:var(--c-text);">'+esc(meInitials)+'</div>'+
         '</div>'+
-        // Right — quick read-outs
+        // Right — personal read-outs
         '<div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:14px;">'+
-          '<div>'+
-            '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Pool balance</div>'+
-            '<div style="font-size:22px;font-weight:800;margin-top:2px;">'+money(d.pool_balance||0)+'</div>'+
-            contributionLine +
-          '</div>'+
+          contributionCard +
           '<div>'+
             '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">This month</div>'+
             '<div style="font-size:14px;color:var(--c-text);margin-top:2px;">'+esc(d.current_period_label||'')+'</div>'+
@@ -3043,15 +3070,21 @@ function _renderClubDashboardMember(d, t, el){
 // Helper: build a 12-segment ring as inline SVG. Each segment is one
 // month, rendered as an arc the same thickness. Colours follow the
 // status palette agreed with the user.
-function _renderYearRingSvg(months, size, thickness, gapDeg){
+function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
+  opts = opts || {};
   if(!months || !months.length){
     return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'"></svg>';
   }
   var cx = size/2, cy = size/2;
-  var r  = (size/2) - (thickness/2) - 2;
+  // Pull the segment ring inward when labels are on so the JAN/FEB/...
+  // text has room to breathe outside the strokes.
+  var labelPad = opts.showLabels ? 16 : 2;
+  var r  = (size/2) - (thickness/2) - labelPad;
   var totalSeg = 12;
   var segDeg   = 360 / totalSeg;
   var paths = '';
+  var labels = '';
+  var MONTH_3 = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   // Convention: month 0 (Jan) starts at the top (-90°) and the ring
   // rotates clockwise like a clock face.
   for(var i = 0; i < totalSeg; i++){
@@ -3060,9 +3093,25 @@ function _renderYearRingSvg(months, size, thickness, gapDeg){
     var startDeg = -90 + (i * segDeg) + (gapDeg/2);
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, m.label || '');
+    if(opts.showLabels){
+      // Position each 3-letter label just outside the ring at the
+      // segment's midpoint angle. Labels stay upright (no rotation)
+      // so they read cleanly on every device.
+      var midDeg = (startDeg + endDeg) / 2;
+      var labelR = r + (thickness/2) + 9;
+      var rad = midDeg * Math.PI / 180;
+      var lx = cx + labelR * Math.cos(rad);
+      var ly = cy + labelR * Math.sin(rad);
+      var isFaded = (m.status === 'future' || m.status === 'not_member');
+      labels +=
+        '<text x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" '+
+          'text-anchor="middle" dominant-baseline="central" '+
+          'font-size="9" font-weight="700" fill="'+(isFaded?'var(--c-text-3)':'var(--c-text-2)')+'" '+
+          (isFaded?'opacity="0.55"':'')+'>'+MONTH_3[i]+'</text>';
+    }
   }
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" '+
-    'style="display:block;">'+ paths +'</svg>';
+    'style="display:block;">'+ paths + labels +'</svg>';
 }
 function _statusColor(status){
   return ({
@@ -3330,49 +3379,154 @@ async function submitMyDuesClaim(){
 //  Renders the existing summary layout so admins/treasurers keep
 //  the data they had until the next iteration lands.
 // ============================================================
-function _renderClubDashboardAdmin(d, t, el){
+
+// =====================================================================
+//  ADMIN (Club) DASHBOARD — Faz B redesign
+//  Hero card layout:
+//   ┌────────────────────────────────────────────────────┐
+//   │ [Club] [My Profile] [See Members]                  │
+//   │                                                    │
+//   │  ╭───────╮     Pool Balance   $123.00              │
+//   │  │ Garage│     Over Dues      $300.00              │
+//   │  │  ring │     IN  (Jun)      +$50.00              │
+//   │  ╰───────╯     OUT (Jun)      -$20.00              │
+//   │     ↑                                              │
+//   │  3-letter        Current month: June 2026 [⋯]      │
+//   │  month labels                                       │
+//   │                                                    │
+//   │  ── legend ──                                       │
+//   └────────────────────────────────────────────────────┘
+//   + Recent activity below
+//
+// Ring rules: green=all paid · red=any unpaid · blue=current month ·
+// faded gray=future / no dues yet. Clicking a segment selects that
+// month and re-renders IN/OUT/Dues on the right side. Clicking the
+// "Garage" centre returns to the live month. Over Dues stays whole-year
+// regardless of selection — it's a year-to-date number, not a slice.
+// =====================================================================
+function _renderClubDashboardAdmin(d, t, el, opts){
+  opts = opts || {};
   var canEdit = !!(t.is_admin || state.is_treasurer);
+  var months = d.year_months || [];
+  // Selected month: persists across re-renders. Default to the current
+  // calendar month so the page opens on "live" data, which is the most
+  // common admin intent.
+  if(!state.clubSelectedMonth) state.clubSelectedMonth = d.current_period;
+  var selected = months.filter(function(m){ return m.period === state.clubSelectedMonth; })[0]
+                 || months.filter(function(m){ return m.status === 'current'; })[0]
+                 || months[months.length-1];
+  // "Current" if the selected period equals the live period — used to
+  // decide whether tapping the centre is a no-op or a useful reset.
+  var isCurrentSelected = !!(selected && selected.period === d.current_period);
 
-  var topCards =
-    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">'+
-      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
-        '<div style="font-size:10px;font-weight:700;color:var(--c-text-3);'+
-             'text-transform:uppercase;letter-spacing:0.5px;">Pool</div>'+
-        '<div style="font-size:18px;font-weight:800;margin-top:4px;">'+ money(d.pool_balance||0) +'</div>'+
+  // ---- Ring ----
+  var ringSize = 240;
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, 16, 5,
+    state.clubSelectedMonth, d.current_period);
+  var clubName = t.name || 'Club';
+  // Truncate club names so the centre disc text always fits. 9 chars
+  // is the threshold where the layout still looks balanced at 240px.
+  var clubLabel = (clubName.length > 9) ? (clubName.slice(0, 8) + '…') : clubName;
+
+  // ---- Right-side info panel ----
+  // Stat rows: Pool Balance + Over Dues are year-wide; IN/OUT update
+  // with the segment selection. We add a small "Selected month" caption
+  // beneath so the user always knows what window they're looking at.
+  var selectedLabel = selected ? selected.label_full : (d.current_period_label || '');
+  var monthIn  = selected ? Number(selected.month_in)  || 0 : 0;
+  var monthOut = selected ? Number(selected.month_out) || 0 : 0;
+  var isUnpaid = selected && selected.status === 'unpaid';
+  // For a red (unpaid) selected month, we surface a small chip the
+  // admin can tap to see who owes — drives the drill-down modal.
+  var unpaidChip = '';
+  if(isUnpaid && canEdit){
+    var miss = Math.max(0, (selected.total_count||0) - (selected.paid_count||0));
+    unpaidChip =
+      '<button id="ss-unpaid-chip" type="button" '+
+        'style="display:inline-flex;align-items:center;gap:6px;'+
+        'padding:5px 10px;border-radius:999px;background:rgba(255,69,58,0.12);'+
+        'color:#ff453a;border:1px solid rgba(255,69,58,0.30);font-size:11px;'+
+        'font-weight:700;cursor:pointer;margin-top:4px;">'+
+        '<span style="width:6px;height:6px;border-radius:50%;background:#ff453a;"></span>'+
+        miss + ' unpaid — see who'+
+      '</button>';
+  }
+
+  var infoPanel =
+    '<div style="flex:1;min-width:170px;display:flex;flex-direction:column;gap:12px;">'+
+      _statRow('Pool Balance', money(d.pool_balance||0)) +
+      _statRow('Over Dues '+esc((d.year||'')+''),
+               money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
+               { hint:'collected of billed' }) +
+      _statRow('IN ('+esc(selected && selected.label_short || '')+')',
+               '+'+money(monthIn), { color:'#30d158' }) +
+      _statRow('OUT ('+esc(selected && selected.label_short || '')+')',
+               '-'+money(monthOut), { color:'#ff453a' }) +
+      '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;'+
+            'display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<span><strong style="color:var(--c-text);">Selected:</strong> '+esc(selectedLabel)+
+          (isCurrentSelected ? '' : ' <a href="#" id="ss-reset-month" '+
+            'style="color:var(--c-tint);text-decoration:none;font-weight:700;">(reset)</a>') +
+        '</span>'+
       '</div>'+
-      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
-        '<div style="font-size:10px;font-weight:700;color:#30d158;'+
-             'text-transform:uppercase;letter-spacing:0.5px;">In ' + esc(d.current_period_label||'') + '</div>'+
-        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#30d158;">+'+ money(d.month_in||0) +'</div>'+
+      unpaidChip +
+    '</div>';
+
+  // Kebab menu — pinned top-right of the hero card. Hosts the admin
+  // actions that used to live in the old tab (Z-Report etc.). Hidden
+  // for non-editing viewers so the chrome stays clean.
+  var kebab = canEdit ? (
+    '<button id="club-kebab" type="button" '+
+      'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
+      'align-items:center;justify-content:center;width:34px;height:34px;'+
+      'border-radius:10px;background:transparent;border:1px solid var(--c-border);'+
+      'color:var(--c-text);cursor:pointer;" title="Club actions">'+
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">'+
+        '<circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>'+
+      '</svg>'+
+    '</button>'
+  ) : '';
+
+  // Hero card. The chip bar sits at the very top *inside* the card —
+  // anchored to the user's primary visual point so it doesn't drift.
+  var heroCard =
+    '<div class="club-hero-card" style="position:relative;background:var(--c-card);'+
+        'border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
+      (opts.chipBarHtml || '') +
+      kebab +
+      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;">'+
+        // Left — ring + clickable centre disc
+        '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;'+
+              'flex-shrink:0;margin:0 auto;">'+
+          ringSvg +
+          '<button type="button" id="ss-club-centre" '+
+            'style="position:absolute;inset:46px;border-radius:50%;background:var(--c-bg);'+
+            'border:'+(isCurrentSelected ? '1px solid var(--c-border)' : '2px solid var(--c-tint)')+
+            ';color:var(--c-text);font-family:inherit;cursor:pointer;'+
+            'display:flex;flex-direction:column;align-items:center;justify-content:center;'+
+            'gap:2px;padding:8px;transition:.15s;">'+
+            '<div style="font-size:18px;font-weight:800;line-height:1;">'+esc(clubLabel)+'</div>'+
+            '<div style="font-size:9px;font-weight:700;color:var(--c-text-3);'+
+                  'text-transform:uppercase;letter-spacing:0.5px;">'+
+              (isCurrentSelected ? esc(selected ? selected.label_short : '') : 'tap to reset')+
+            '</div>'+
+          '</button>'+
+        '</div>'+
+        infoPanel +
       '</div>'+
-      '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 10px;text-align:center;">'+
-        '<div style="font-size:10px;font-weight:700;color:#ff453a;'+
-             'text-transform:uppercase;letter-spacing:0.5px;">Out</div>'+
-        '<div style="font-size:18px;font-weight:800;margin-top:4px;color:#ff453a;">-'+ money(d.month_out||0) +'</div>'+
+      // Legend below the hero.
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
+            'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
+        _ringLegendItem('#30d158', 'All paid')+
+        _ringLegendItem('#ff453a', 'Unpaid')+
+        _ringLegendItem('#0a84ff', 'Current')+
+        _ringLegendItem('#3a3a3c', 'No dues yet', true)+
       '</div>'+
     '</div>';
 
-  var duesPaid = Number(d.dues_paid_this_month) || 0;
-  var duesPending = Number(d.dues_pending_this_month) || 0;
-  var coveragePct = (duesPaid + duesPending) > 0
-    ? Math.round(100 * duesPaid / (duesPaid + duesPending)) : 0;
-  var coverageCard =
-    '<div style="background:var(--c-card);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;">'+
-      '<div style="display:flex;align-items:baseline;justify-content:space-between;">'+
-        '<div style="font-size:13px;font-weight:700;">Dues for '+esc(d.current_period_label||'')+'</div>'+
-        '<div style="font-size:12px;color:var(--c-text-2);">'+(d.dues_paid_count||0)+' / '+(d.dues_total_count||0)+' paid</div>'+
-      '</div>'+
-      '<div style="height:8px;background:var(--c-bg);border-radius:4px;margin-top:10px;overflow:hidden;">'+
-        '<div style="height:100%;width:'+coveragePct+'%;background:#30d158;transition:width .3s;"></div>'+
-      '</div>'+
-      '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--c-text-2);margin-top:8px;">'+
-        '<span><strong style="color:#30d158;">'+money(duesPaid)+'</strong> collected</span>'+
-        '<span><strong style="color:var(--c-text);">'+money(duesPending)+'</strong> pending</span>'+
-      '</div>'+
-    '</div>';
-
+  // ---- Recent activity (last 5 events; "View all" link wired later)
   var recentRows = '';
-  (d.recent || []).forEach(function(ev){
+  (d.recent || []).slice(0, 5).forEach(function(ev){
     var sign, color, lbl;
     if(ev.kind === 'expense'){
       sign = '-'; color = '#ff453a';
@@ -3387,34 +3541,345 @@ function _renderClubDashboardAdmin(d, t, el){
     var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
       {month:'short', day:'numeric'}) : '';
     recentRows +=
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;'+
+        'padding:10px 0;border-top:1px solid var(--c-border);">'+
         '<div style="min-width:0;">'+
           '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
-          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+            esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
         '</div>'+
-        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;'+
+              'white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
       '</div>';
   });
   if(!recentRows){
-    recentRows = '<div style="padding:18px 0;text-align:center;color:var(--c-text-3);font-size:13px;">No activity yet.</div>';
+    recentRows = '<div style="padding:18px 0;text-align:center;color:var(--c-text-3);'+
+      'font-size:13px;">No activity yet.</div>';
   }
   var recentCard =
-    '<div style="background:var(--c-card);border-radius:var(--r);padding:6px 16px 12px;margin-bottom:14px;">'+
-      '<div style="padding:14px 0 4px;font-size:13px;font-weight:700;">Recent activity</div>'+
+    '<div style="background:var(--c-card);border-radius:var(--r);padding:6px 16px 12px;'+
+        'margin-bottom:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 4px;">'+
+        '<div style="font-size:13px;font-weight:700;">Recent activity</div>'+
+        // "View all" wires to the existing My Activity modal for now;
+        // Faz D will turn it into a club-wide feed with filters.
+        (canEdit
+          ? '<a href="#" id="club-view-all-activity" '+
+              'style="font-size:12px;color:var(--c-tint);text-decoration:none;font-weight:600;">View all →</a>'
+          : '')+
+      '</div>'+
       recentRows +
     '</div>';
 
-  var reportBtn = '';
-  if(canEdit){
-    reportBtn =
-      '<button class="btn btn-secondary" id="club-zreport-btn" '+
-        'style="width:100%;margin-top:4px;">Generate Z-Report</button>';
+  el.innerHTML = heroCard + recentCard;
+
+  // -----  Wire interactions  -----
+  // 1. Ring segments: select a month.
+  el.querySelectorAll('[data-seg-period]').forEach(function(seg){
+    seg.style.cursor = 'pointer';
+    seg.onclick = function(){
+      var p = seg.dataset.segPeriod;
+      if(!p) return;
+      if(state.clubSelectedMonth === p){
+        // Re-clicking the already-selected segment when it's red opens
+        // the drill-down. Otherwise it's a no-op.
+        if(seg.dataset.segStatus === 'unpaid'){ openClubMonthUnpaid(p); }
+        return;
+      }
+      state.clubSelectedMonth = p;
+      _renderClubDashboardFromState();
+    };
+  });
+  // 2. Centre disc: reset to current month.
+  var centre = $('ss-club-centre');
+  if(centre){
+    centre.onclick = function(){
+      if(state.clubSelectedMonth === d.current_period) return;
+      state.clubSelectedMonth = d.current_period;
+      _renderClubDashboardFromState();
+    };
   }
+  // 3. Reset link in the panel.
+  var resetLink = $('ss-reset-month');
+  if(resetLink){
+    resetLink.onclick = function(ev){
+      ev.preventDefault();
+      state.clubSelectedMonth = d.current_period;
+      _renderClubDashboardFromState();
+    };
+  }
+  // 4. Unpaid chip: open drill-down for the selected month.
+  var unpaidBtn = $('ss-unpaid-chip');
+  if(unpaidBtn){
+    unpaidBtn.onclick = function(){ openClubMonthUnpaid(state.clubSelectedMonth); };
+  }
+  // 5. Kebab menu — Z-Report, Edit dues, Treasurer, Recycle for now.
+  var kebabBtn = $('club-kebab');
+  if(kebabBtn){
+    kebabBtn.onclick = function(){ openClubKebabMenu(kebabBtn); };
+  }
+  // 6. View-all activity link (placeholder until Faz D).
+  var va = $('club-view-all-activity');
+  if(va){
+    va.onclick = function(ev){
+      ev.preventDefault();
+      // Re-use the personal activity modal until Faz D ships the
+      // club-wide filtered feed. Better than dead-ending the link.
+      if(typeof openMyYearActivity === 'function') openMyYearActivity();
+      else toast('Coming soon');
+    };
+  }
+}
 
-  el.innerHTML = topCards + coverageCard + recentCard + reportBtn;
+// Helper used by the right-side info panel — labelled stat row.
+function _statRow(label, value, opts){
+  opts = opts || {};
+  var color = opts.color || 'var(--c-text)';
+  var hint = opts.hint ? '<div style="font-size:10px;color:var(--c-text-3);margin-top:1px;">'+esc(opts.hint)+'</div>' : '';
+  return '<div>'+
+    '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+          'text-transform:uppercase;letter-spacing:0.5px;">'+esc(label)+'</div>'+
+    '<div style="font-size:18px;font-weight:800;margin-top:2px;color:'+color+';">'+value+'</div>'+
+    hint +
+    '</div>';
+}
 
-  var b = $('club-zreport-btn');
-  if(b){ b.onclick = openClubZReport; }
+// =====================================================================
+//  Club ring (admin) — 12 segments + 3-letter labels + click targets.
+//  Differences from the member ring:
+//   - status colours follow the club rules (all_paid/unpaid/current/...)
+//   - the selected segment gets a thicker, slightly brighter stroke
+//   - every <path> carries data-seg-period so click handlers can tell
+//     which month was tapped
+// =====================================================================
+function _renderClubYearRingSvg(months, size, thickness, gapDeg,
+                                selectedPeriod, currentPeriod){
+  if(!months || !months.length){
+    return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'"></svg>';
+  }
+  var cx = size/2, cy = size/2;
+  var labelPad = 18;
+  var r  = (size/2) - (thickness/2) - labelPad;
+  var totalSeg = 12;
+  var segDeg   = 360 / totalSeg;
+  var paths = '';
+  var labels = '';
+  var MONTH_3 = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  for(var i = 0; i < totalSeg; i++){
+    var m = months[i] || { status:'future', period:null };
+    var isSelected = (selectedPeriod && m.period === selectedPeriod);
+    var isCurrent  = (currentPeriod  && m.period === currentPeriod);
+    // Effective status used purely for COLOUR. The blue "current"
+    // overlay only wins when nothing's selected on that segment — once
+    // the admin taps a segment we keep its data-driven colour so they
+    // can still tell at a glance whether the selected month is healthy.
+    var effStatus = m.status;
+    if(isCurrent && !isSelected && (effStatus === 'future')) effStatus = 'current';
+    if(isCurrent && !isSelected) effStatus = 'current';  // always blue when live & not selected
+    var color = _clubStatusColor(effStatus);
+    var startDeg = -90 + (i * segDeg) + (gapDeg/2);
+    var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
+    paths += _clubArcPath(cx, cy, r, startDeg, endDeg, color,
+      isSelected ? thickness + 4 : thickness,
+      m.label_full || '', m.period, m.status, isSelected);
+    // 3-letter label outside the ring, midpoint angle, upright text.
+    var midDeg = (startDeg + endDeg) / 2;
+    var labelR = r + (thickness/2) + 10;
+    var rad = midDeg * Math.PI / 180;
+    var lx = cx + labelR * Math.cos(rad);
+    var ly = cy + labelR * Math.sin(rad);
+    var fade = (m.status === 'future') ? 0.45 : 1;
+    var weight = isSelected ? 800 : (isCurrent ? 700 : 600);
+    var fill = isSelected ? 'var(--c-tint)'
+              : isCurrent ? 'var(--c-tint)'
+              : 'var(--c-text-2)';
+    labels +=
+      '<text x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" '+
+        'text-anchor="middle" dominant-baseline="central" '+
+        'font-size="10" font-weight="'+weight+'" fill="'+fill+'" '+
+        'opacity="'+fade+'" style="pointer-events:none;">'+MONTH_3[i]+'</text>';
+  }
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" '+
+    'style="display:block;">'+ paths + labels +'</svg>';
+}
+function _clubStatusColor(status){
+  return ({
+    all_paid: '#30d158',
+    unpaid:   '#ff453a',
+    current:  '#0a84ff',
+    no_dues:  '#3a3a3c',
+    future:   '#3a3a3c'
+  })[status] || '#3a3a3c';
+}
+function _clubArcPath(cx, cy, r, startDeg, endDeg, color, thickness,
+                       title, period, status, isSelected){
+  function pt(angleDeg){
+    var a = angleDeg * Math.PI / 180;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  }
+  var p1 = pt(startDeg);
+  var p2 = pt(endDeg);
+  var largeArc = (endDeg - startDeg) > 180 ? 1 : 0;
+  // Future months get a soft opacity so the live ring breathes; the
+  // selected segment never fades — even if its colour is gray.
+  var opacity = (color === '#3a3a3c' && !isSelected) ? 0.30 : 1;
+  var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
+  return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
+         '" stroke-linecap="round" fill="none" opacity="'+opacity+'" '+
+         'data-seg-period="'+esc(period||'')+'" '+
+         'data-seg-status="'+esc(status||'')+'" '+
+         (isSelected ? 'filter="drop-shadow(0 0 4px '+color+'55)"' : '') + '>'+
+         (title ? '<title>'+esc(title)+'</title>' : '') +
+         '</path>';
+}
+
+// =====================================================================
+//  CLUB ACTIONS KEBAB MENU
+//  Hosts the Z-Report and (later) edit-dues etc. Tapping the kebab
+//  opens a simple bottom-sheet of action rows. Keeps the hero card
+//  free of buttons while preserving every admin power.
+// =====================================================================
+function openClubKebabMenu(anchorBtn){
+  var canEdit = !!(state.trip && (state.trip.is_admin || state.is_treasurer));
+  if(!canEdit) return;
+  var items = [
+    { id:'zreport',  label:'Generate Z-Report', icon:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+      handler: function(){ openClubZReport(); } },
+    { id:'matrix',   label:'Dues matrix',       icon:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>',
+      handler: function(){ openClubDuesMatrix(); } }
+  ];
+  // Render the same dialog modal we use for confirm/alert, but with a
+  // list body and no buttons.
+  $('dlg-title').textContent = 'Club actions';
+  var body = '<div style="display:flex;flex-direction:column;gap:4px;">';
+  items.forEach(function(it){
+    body += '<button type="button" data-kebab-id="'+it.id+'" '+
+      'style="display:flex;align-items:center;gap:12px;padding:13px 12px;'+
+      'background:transparent;border:none;border-radius:10px;cursor:pointer;'+
+      'font-family:inherit;font-size:14px;color:var(--c-text);text-align:left;width:100%;">'+
+      '<span style="flex-shrink:0;width:32px;height:32px;border-radius:8px;'+
+        'background:var(--c-bg);color:var(--c-text-2);'+
+        'display:flex;align-items:center;justify-content:center;">'+it.icon+'</span>'+
+      '<span>'+esc(it.label)+'</span>'+
+      '</button>';
+  });
+  body += '</div>';
+  $('dlg-body').innerHTML = body;
+  var okBtn = $('dlg-ok');
+  var cxBtn = $('dlg-cancel');
+  okBtn.hidden = true;
+  cxBtn.hidden = false;
+  cxBtn.textContent = 'Close';
+  function cleanup(){
+    okBtn.hidden = false;
+    cxBtn.onclick = null;
+    $('dlg-body').onclick = null;
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+    closeModal('modal-dialog');
+  }
+  cxBtn.onclick = cleanup;
+  $('modal-dialog').querySelector('.modal-backdrop').onclick = cleanup;
+  $('dlg-body').onclick = function(ev){
+    var b = ev.target.closest('[data-kebab-id]');
+    if(!b) return;
+    var id = b.dataset.kebabId;
+    var hit = items.filter(function(x){ return x.id === id; })[0];
+    cleanup();
+    if(hit && typeof hit.handler === 'function'){
+      // Slight delay so the dialog's close transition has visual room.
+      setTimeout(hit.handler, 160);
+    }
+  };
+  openModal('modal-dialog');
+}
+
+// =====================================================================
+//  Drill-down: who hasn't paid for the selected month
+//  Opens when the admin taps the red "X unpaid" chip or re-taps an
+//  already-selected red segment. The list is sorted by name and each
+//  row has a "Mark paid" affordance so the admin can resolve the
+//  unpaid status without leaving the Dashboard.
+// =====================================================================
+async function openClubMonthUnpaid(period){
+  $('dlg-title').textContent = 'Unpaid dues';
+  $('dlg-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  var okBtn = $('dlg-ok');
+  var cxBtn = $('dlg-cancel');
+  okBtn.hidden = true;
+  cxBtn.hidden = false;
+  cxBtn.textContent = 'Close';
+  function cleanup(){
+    okBtn.hidden = false;
+    cxBtn.onclick = null;
+    $('dlg-body').onclick = null;
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+    closeModal('modal-dialog');
+  }
+  cxBtn.onclick = cleanup;
+  $('modal-dialog').querySelector('.modal-backdrop').onclick = cleanup;
+  openModal('modal-dialog');
+  try{
+    var res = await sb.rpc('get_club_month_unpaid',
+      { p_trip: state.trip.trip_id, p_period: period });
+    if(res.error) throw res.error;
+    var data = res.data || { items:[] };
+    var items = data.items || [];
+    $('dlg-title').textContent = 'Unpaid — ' + (data.period_label || '');
+    if(items.length === 0){
+      $('dlg-body').innerHTML =
+        '<div style="text-align:center;color:var(--c-text-3);font-size:13px;padding:20px 0;">'+
+        'No one is unpaid for this month.</div>';
+      return;
+    }
+    var rowsHtml = '';
+    items.forEach(function(it){
+      var statusLbl, statusColor;
+      if(it.status === 'partial'){
+        statusLbl = money(it.balance) + ' left of ' + money(it.amount);
+        statusColor = '#ff9f0a';
+      } else {
+        statusLbl = money(it.amount) + ' owed';
+        statusColor = '#ff453a';
+      }
+      rowsHtml +=
+        '<button type="button" data-md-row="'+esc(it.dues_id)+'" '+
+          'style="display:flex;align-items:center;gap:10px;width:100%;'+
+          'padding:10px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
+          'border-radius:10px;margin-bottom:6px;cursor:pointer;text-align:left;'+
+          'font-family:inherit;color:var(--c-text);">'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:14px;font-weight:600;">'+esc(it.display_name)+'</div>'+
+            '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
+              esc(statusLbl)+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--c-tint);">Mark paid →</span>'+
+        '</button>';
+    });
+    $('dlg-body').innerHTML = rowsHtml;
+    $('dlg-body').onclick = function(ev){
+      var r = ev.target.closest('[data-md-row]');
+      if(!r) return;
+      var duesId = r.dataset.mdRow;
+      var hit = items.filter(function(x){ return x.dues_id === duesId; })[0];
+      if(!hit) return;
+      cleanup();
+      // Re-use the existing mark-dues modal. Build the shape it expects.
+      setTimeout(function(){
+        openMarkDuesModal({
+          dues_id: hit.dues_id,
+          actor:   hit.display_name,
+          period:  period,
+          status:  hit.status,
+          amount:  hit.amount,
+          paid_amount: hit.paid_amount
+        });
+      }, 160);
+    };
+  }catch(err){
+    $('dlg-body').innerHTML =
+      '<div style="text-align:center;color:var(--c-danger);font-size:13px;padding:20px 0;">'+
+      esc(err.message||'Could not load')+'</div>';
+  }
 }
 
 // Dues & Expenses tab for clubs. Shows a single unified feed of money
@@ -7692,6 +8157,7 @@ document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b)
     // member→admin would leave them stuck on whichever screen the chip
     // bar was last set to.
     state.adminClubView = 'club';
+    state.clubSelectedMonth = null;  // reset Faz B month picker
     // Full club-view reflow. The tab bar, the active tab, and the FAB
     // all depend on the *effective* role. Without this, the dashboard
     // panel re-renders into member layout but the tab strip stays
