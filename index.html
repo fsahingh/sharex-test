@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.17">
+<meta name="app-version" content="V2-CLUB.18">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1767,7 +1767,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.17';
+var APP_VERSION = 'V2-CLUB.18';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2716,8 +2716,21 @@ function setActiveTab(name){
     var isGA = !!(state.profile && state.profile.is_global_admin);
     if(isGA && getClubViewAs() === 'member') canEdit = false;
     if(canEdit){
-      // Admin/treasurer FAB targets match the active tab.
-      if(name === 'members'){
+      // Admin/treasurer FAB targets match the active tab. Dashboard is
+      // the canonical entry point under the Faz B/E redesign — its FAB
+      // opens the Expense vs Pool In chooser. The legacy Members and
+      // Ledger tabs keep their own FAB targets until Faz F removes them.
+      if(name === 'dashboard'){
+        // The FAB only makes sense when the admin is looking at the
+        // CLUB sub-view. In My Profile preview the page is read-only
+        // and a FAB here would imply actions that don't actually apply
+        // (you can't "add an expense to yourself"). Hide it.
+        if((state.adminClubView || 'club') === 'club'){
+          show('td-fab'); fab.onclick = openClubLedgerAdd;
+        } else {
+          hide('td-fab'); fab.onclick = null;
+        }
+      } else if(name === 'members'){
         show('td-fab'); fab.onclick = openAddClubMember;
       } else if(name === 'ledger'){
         show('td-fab'); fab.onclick = openClubLedgerAdd;
@@ -2911,6 +2924,11 @@ function _renderClubDashboardFromState(){
     // Members never see the chip bar — they have one surface only.
     _renderClubDashboardMember(d, t, el);
   }
+  // Re-run FAB visibility logic. The FAB depends on adminClubView and
+  // on whether we're in viewing-another-member mode — both can change
+  // without going through setActiveTab (chip flip, profile drill-down,
+  // back button). Re-evaluating here keeps the FAB honest in every path.
+  if(state.activeTab === 'dashboard') setActiveTab('dashboard');
 }
 
 // Unified ring sizing — both member and admin layouts go through this
