@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.20">
+<meta name="app-version" content="V2-CLUB.21">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1767,7 +1767,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.20';
+var APP_VERSION = 'V2-CLUB.21';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3247,6 +3247,10 @@ function _renderClubDashboardMember(d, t, el, opts){
   // actor name. For dues_paid the actor IS the member; for pool_in the
   // actor is whoever paid; for expense the actor is the payer.
   var personalEvents = (d.recent || []).filter(function(ev){
+    // Membership-action audit rows are governance, not personal
+    // finance — keep them out of the member surface so it stays
+    // focused on the member's own money flow.
+    if(ev.kind === 'audit') return false;
     // Best signal we have on the global feed is the actor display name —
     // match it against the caller's display name.
     if(meName && ev.actor === meName) return true;
@@ -3731,19 +3735,12 @@ async function _refreshClubActivity(){
   var filter = state.clubActivityFilter || 'all';
   var memberDir = state.clubActivityMemberDir;
 
-  // Placeholder: Member Actions audit log isn't wired up yet — show
-  // a friendly "coming soon" message so the menu surface doesn't
-  // dead-end on an empty list.
-  if(filter === 'member_actions'){
-    $('ca-body').innerHTML =
-      '<div class="empty" style="padding:30px 12px;">'+
-        '<div class="empty-title">Coming soon</div>'+
-        '<div class="empty-sub" style="line-height:1.5;">Member actions '+
-        '(joins, withdrawals, role changes) will appear here once the '+
-        'audit log is enabled.</div>'+
-      '</div>';
-    return;
-  }
+  // Member Actions audit log: SQL #52 turned this on. The RPC accepts
+  // the 'member_actions' filter directly and returns audit rows; no
+  // special handling needed here beyond passing it through. We keep
+  // a small note so an empty list reads as "no actions yet" rather
+  // than "we lost your data".
+  // (Original placeholder removed in this version.)
 
   // If the filter is "member" we wait for the picker before hitting
   // the RPC — without a directory id the result would be the full
@@ -3817,6 +3814,29 @@ function _activityDayLabel(d){
 }
 
 function _activityRowHtml(ev){
+  // Audit (membership-action) rows are rendered very differently from
+  // the financial ones: no dollar amount on the right, a muted icon
+  // instead, and a human-readable phrase as the main line.
+  if(ev.kind === 'audit'){
+    var label = _auditLabel(ev);
+    var when = ev.at ? new Date(ev.at).toLocaleTimeString(undefined,
+      { hour:'numeric', minute:'2-digit' }) : '';
+    return '<div style="display:flex;align-items:center;gap:10px;'+
+      'padding:10px 4px;border-top:1px solid var(--c-border);">'+
+      // Subtle governance icon on the left so audit rows scan
+      // differently than money rows even at a glance.
+      '<span style="flex-shrink:0;width:26px;height:26px;border-radius:50%;'+
+        'background:var(--c-bg);color:var(--c-text-2);'+
+        'display:inline-flex;align-items:center;justify-content:center;">'+
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>'+
+      '</span>'+
+      '<div style="min-width:0;flex:1;">'+
+        '<div style="font-size:13px;color:var(--c-text);">'+esc(label)+'</div>'+
+        '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+          esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
+      '</div>'+
+    '</div>';
+  }
   var sign, color, lbl, sub;
   if(ev.kind === 'expense'){
     sign = '-'; color = '#ff453a';
@@ -3842,6 +3862,39 @@ function _activityRowHtml(ev){
     '<div style="font-size:14px;font-weight:700;color:'+color+';white-space:nowrap;">'+
       sign+money(ev.amount||0)+'</div>'+
   '</div>';
+}
+
+// Translates a backend audit row into a human-readable phrase. The
+// shape mirrors what the spec wants in "Member Actions": who did
+// what to whom. Falls back to a generic "<actor> performed <action>"
+// for any action we haven't templated yet — keeps the UI safe when
+// new audit actions are added later.
+function _auditLabel(ev){
+  var actor  = ev.actor || 'Someone';
+  var target = ev.target_name || 'a member';
+  switch(ev.action){
+    case 'member_added':
+      return actor + ' added ' + target + ' to the club';
+    case 'member_withdrawn':
+      return target + ' was removed from the club';
+    case 'member_set_inactive':
+      return actor + ' set ' + target + ' inactive';
+    case 'member_reactivated':
+      return actor + ' reactivated ' + target;
+    case 'admin_granted':
+      return target + ' became an admin';
+    case 'admin_revoked':
+      return target + ' is no longer an admin';
+    case 'treasurer_changed':
+      // payload.new_treasurer_dir may equal target; phrasing reads
+      // best as "Treasurer changed to <target>" when there's a new
+      // treasurer, and "Treasurer role removed" when target is null.
+      return target && target !== 'a member'
+        ? 'Treasurer changed to ' + target
+        : 'Treasurer role removed';
+    default:
+      return actor + ' performed ' + (ev.action || 'an action');
+  }
 }
 
 // "I paid dues" claim flow. Fetches the caller's unpaid/partial dues
@@ -4094,6 +4147,30 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   // ---- Recent activity (last 5 events; "View all" link wired later)
   var recentRows = '';
   (d.recent || []).slice(0, 5).forEach(function(ev){
+    // Audit (membership-action) rows render with no dollar amount —
+    // they're governance, not money. We surface them in this feed so
+    // an admin scanning the dashboard sees "Ali added Mehmet" right
+    // alongside the financial events.
+    if(ev.kind === 'audit'){
+      var labelA = _auditLabel(ev);
+      var whenA = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
+        {month:'short', day:'numeric'}) : '';
+      recentRows +=
+        '<div style="display:flex;align-items:center;gap:10px;'+
+          'padding:10px 0;border-top:1px solid var(--c-border);">'+
+          '<span style="flex-shrink:0;width:22px;height:22px;border-radius:50%;'+
+            'background:var(--c-bg);color:var(--c-text-2);'+
+            'display:inline-flex;align-items:center;justify-content:center;">'+
+            '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>'+
+          '</span>'+
+          '<div style="min-width:0;flex:1;">'+
+            '<div style="font-size:13px;color:var(--c-text);">'+esc(labelA)+'</div>'+
+            '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+              esc(ev.actor||'')+(whenA?' &middot; '+whenA:'')+'</div>'+
+          '</div>'+
+        '</div>';
+      return;
+    }
     var sign, color, lbl;
     if(ev.kind === 'expense'){
       sign = '-'; color = '#ff453a';
