@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.18">
+<meta name="app-version" content="V2-CLUB.19">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1767,7 +1767,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.18';
+var APP_VERSION = 'V2-CLUB.19';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2721,14 +2721,16 @@ function setActiveTab(name){
       // opens the Expense vs Pool In chooser. The legacy Members and
       // Ledger tabs keep their own FAB targets until Faz F removes them.
       if(name === 'dashboard'){
-        // The FAB only makes sense when the admin is looking at the
-        // CLUB sub-view. In My Profile preview the page is read-only
-        // and a FAB here would imply actions that don't actually apply
-        // (you can't "add an expense to yourself"). Hide it.
+        // Faz E/F: Dashboard hosts the FAB in both admin sub-views.
+        //  - Club view   → Add Expense / Pool In (club-wide actions)
+        //  - My Profile  → Add Expense / I Pay Dues (admin's OWN
+        //    profile, mirroring what a regular member would see)
+        // Viewing-another-member mode is excluded earlier and never
+        // reaches this branch.
         if((state.adminClubView || 'club') === 'club'){
           show('td-fab'); fab.onclick = openClubLedgerAdd;
         } else {
-          hide('td-fab'); fab.onclick = null;
+          show('td-fab'); fab.onclick = openMemberAction;
         }
       } else if(name === 'members'){
         show('td-fab'); fab.onclick = openAddClubMember;
@@ -3469,7 +3471,24 @@ function openSeeMembersModal(){
     '</div>';
   }
 
-  var html = '<div style="font-size:12px;color:var(--c-text-3);margin-bottom:8px;">'+
+  // Admin surface gets an Add Member affordance at the top of the
+  // body — replaces the FAB that used to live on the (now-legacy)
+  // Members tab. Stays visually distinct from the row chevrons so it
+  // reads as a "do something" button, not a list item.
+  var addBtn = isAdminEff
+    ? '<button id="sm-add-member" type="button" '+
+        'style="display:flex;align-items:center;gap:10px;width:100%;'+
+        'padding:11px 12px;background:var(--c-tint);color:#fff;'+
+        'border:none;border-radius:10px;font-family:inherit;'+
+        'font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;'+
+        'box-shadow:0 2px 8px rgba(10,132,255,0.25);">'+
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>'+
+        '<span>Add member</span>'+
+      '</button>'
+    : '';
+
+  var html = addBtn +
+    '<div style="font-size:12px;color:var(--c-text-3);margin-bottom:8px;">'+
     members.length + ' member' + (members.length===1?'':'s') +
     (inactive.length ? ', '+inactive.length+' inactive' : '') + '</div>';
   active.forEach(function(m){ html += rowHtml(m); });
@@ -3480,10 +3499,19 @@ function openSeeMembersModal(){
   }
   $('sm-body').innerHTML = html;
 
-  // Wire admin-surface interactions. The edit pen must NOT bubble up to
-  // the row's profile-open click — we stopPropagation on the pen.
+  // Wire admin-surface interactions. Three click targets in priority
+  // order: Add Member button, Edit pen on a row, and the row itself
+  // (which opens the profile-view).
   if(isAdminEff){
     $('sm-body').onclick = function(ev){
+      var add = ev.target.closest('#sm-add-member');
+      if(add){
+        closeModal('modal-see-members');
+        // Same delay used by the other modal hand-offs — gives the
+        // close transition room before the next sheet slides up.
+        setTimeout(function(){ openAddClubMember(); }, 160);
+        return;
+      }
       var pen = ev.target.closest('[data-sm-edit]');
       if(pen){
         ev.stopPropagation();
