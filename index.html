@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.19">
+<meta name="app-version" content="V2-CLUB.20">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1767,7 +1767,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.19';
+var APP_VERSION = 'V2-CLUB.20';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2405,29 +2405,20 @@ async function openTripInternal(tripId, tab){
     // `tab` wins only if it's valid for this kind.
     var isClub = (state.trip.kind === 'club');
     if(isClub){
-      hide('tabs-trip'); show('tabs-club');
-      var validClubTabs = {dashboard:1, ledger:1, members:1};
-      if(!validClubTabs[state.activeTab]) state.activeTab = 'dashboard';
+      hide('tabs-trip');
+      // Faz F: club view collapses to a single Dashboard surface for
+      // every role. The chip bar inside the hero card now handles the
+      // role-specific navigation (Club / My Profile / See Members), so
+      // the old tab strip — which exposed legacy "Dues & Expenses" and
+      // "Members" panes — is permanently hidden. The dashboard pane is
+      // the only one anyone ever sees, and `state.activeTab` is locked
+      // to it.
+      hide('tabs-club');
+      state.activeTab = 'dashboard';
       // Cache whether the current user is the treasurer — used by
       // setActiveTab to decide if the FAB should appear.
       var myDir = state.trip.my_directory_id;
       state.is_treasurer = (myDir && myDir === state.trip.treasurer_directory_id);
-      // Members get a single-pane experience: the entire dashboard fits
-      // their needs (status, history, members list via modal, dues claim
-      // via FAB), so the tab bar would just add visual noise. Admins and
-      // treasurers keep all three tabs. The global admin always sees the
-      // admin layout but can use the View-As toggle to preview the
-      // member experience — in that case we hide the tab bar too so the
-      // preview matches what a real member sees.
-      var effIsAdmin = !!(state.trip.is_admin || state.is_treasurer);
-      var isGA = !!(state.profile && state.profile.is_global_admin);
-      if(isGA && getClubViewAs() === 'member') effIsAdmin = false;
-      if(!effIsAdmin){
-        // Force the dashboard tab and hide the entire tab strip so the
-        // dashboard becomes the only surface for members.
-        state.activeTab = 'dashboard';
-        hide('tabs-club');
-      }
       $('tab-dashboard').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
     } else {
       show('tabs-trip'); hide('tabs-club');
@@ -3205,6 +3196,50 @@ function _renderClubDashboardMember(d, t, el, opts){
       '</div>';
   }
 
+  // ---- Viewing mode: actionable "Mark paid" list -----------------------
+  // When an admin is looking at another member's profile, the unpaid
+  // months become directly actionable from here. Each row opens the
+  // mark-dues-paid modal pre-filled with that period. On the member's
+  // own dashboard this section is omitted — members can't mark their
+  // own dues paid; they go through the "I paid dues" claim flow.
+  var manageUnpaidCard = '';
+  if(opts.isViewing && unpaidPeriods.length > 0){
+    var manageRows = '';
+    unpaidPeriods.forEach(function(p){
+      var statusLbl, statusColor;
+      var paid = Number(p.paid_amount) || 0;
+      var balance = Number(p.balance) || (Number(p.amount) - paid);
+      if(paid > 0){
+        statusLbl = money(balance) + ' left of ' + money(p.amount);
+        statusColor = '#ff9f0a';
+      } else {
+        statusLbl = money(p.amount) + ' owed';
+        statusColor = '#ff453a';
+      }
+      manageRows +=
+        '<button type="button" data-mark-dues-id="'+esc(p.dues_id)+'" '+
+          'style="display:flex;align-items:center;gap:10px;width:100%;'+
+          'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
+          'border-radius:10px;margin-bottom:6px;cursor:pointer;text-align:left;'+
+          'font-family:inherit;color:var(--c-text);">'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:14px;font-weight:600;">'+esc(p.label)+'</div>'+
+            '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
+              esc(statusLbl)+'</div>'+
+          '</div>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">Mark paid →</span>'+
+        '</button>';
+    });
+    manageUnpaidCard =
+      '<div style="background:var(--c-bg);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;border:1px solid var(--c-border);">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+          'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">'+
+          'Manage unpaid'+
+        '</div>'+
+        manageRows +
+      '</div>';
+  }
+
   // ---- Recent activity — STRICTLY PERSONAL ---------------------------
   // Pull only events the caller participated in: their own paid dues,
   // their own pool inflows, and their own expenses. Backend `recent`
@@ -3258,7 +3293,30 @@ function _renderClubDashboardMember(d, t, el, opts){
       viewAllLink +
     '</div>';
 
-  el.innerHTML = backBar + heroCard + statusCard + recentCard;
+  el.innerHTML = backBar + heroCard + statusCard + manageUnpaidCard + recentCard;
+
+  // Viewing-mode Mark-paid wiring. Each row carries the dues_id; the
+  // click opens the existing mark-dues-paid modal pre-loaded with the
+  // target member's name and the period state.
+  if(opts.isViewing){
+    el.querySelectorAll('[data-mark-dues-id]').forEach(function(b){
+      b.onclick = function(){
+        var duesId = b.dataset.markDuesId;
+        var p = unpaidPeriods.filter(function(x){
+          return String(x.dues_id) === String(duesId);
+        })[0];
+        if(!p) return;
+        openMarkDuesModal({
+          dues_id:     p.dues_id,
+          actor:       opts.viewingName || meName,
+          period:      p.period,
+          status:      (Number(p.paid_amount) > 0) ? 'partial' : 'unpaid',
+          amount:      p.amount,
+          paid_amount: p.paid_amount
+        });
+      };
+    });
+  }
 
   // Wire the Back button (viewing-another-member mode only).
   var back = $('mp-back');
@@ -4698,7 +4756,14 @@ async function submitMarkDuesPaid(){
     state.clubLedgerLoadedFor = null;
     state.clubMembersLoadedFor = null;
     state.clubDashboardLoadedFor = null;
-    renderActiveTab();
+    // If the admin marked dues paid while viewing another member's
+    // profile, the target's payload needs a fresh fetch — the ring,
+    // status card, and unpaid list all depend on the new state.
+    if(state.viewingMember && state.viewingMember.directory_id){
+      openMemberProfileView(state.viewingMember.directory_id);
+    } else {
+      renderActiveTab();
+    }
   }catch(err){
     setMsg(err.message || 'Could not save.');
   }
@@ -4716,7 +4781,11 @@ async function submitMarkDuesUnpaid(){
     state.clubLedgerLoadedFor = null;
     state.clubMembersLoadedFor = null;
     state.clubDashboardLoadedFor = null;
-    renderActiveTab();
+    if(state.viewingMember && state.viewingMember.directory_id){
+      openMemberProfileView(state.viewingMember.directory_id);
+    } else {
+      renderActiveTab();
+    }
   }catch(err){
     toast(err.message || 'Could not save.', true);
   }
@@ -8806,17 +8875,12 @@ document.querySelectorAll('#acc-viewas-chips [data-viewas]').forEach(function(b)
     // openTripInternal runs when it first decides what to show, so a
     // chip flip is indistinguishable from a real page load.
     if(state.trip && state.trip.kind === 'club'){
-      var effIsAdmin = !!(state.trip.is_admin || state.is_treasurer);
-      var isGA = !!(state.profile && state.profile.is_global_admin);
-      if(isGA && getClubViewAs() === 'member') effIsAdmin = false;
-      if(effIsAdmin){
-        show('tabs-club');
-        // Keep the user on whatever tab they were viewing.
-      } else {
-        // Member-only experience: dashboard is the only surface.
-        state.activeTab = 'dashboard';
-        hide('tabs-club');
-      }
+      // Faz F: tabs are gone; the dashboard is the only surface and
+      // role-specific affordances live inside the hero card chip bar.
+      // Lock activeTab and keep the tab strip hidden regardless of
+      // which role the GA is previewing as.
+      state.activeTab = 'dashboard';
+      hide('tabs-club');
       setActiveTab(state.activeTab);
       _renderClubDashboardFromState();
     }
