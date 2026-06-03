@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.15">
+<meta name="app-version" content="V2-CLUB.16">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -956,11 +956,44 @@
   </div>
 </div>
 
-<!-- ======================= Z-REPORT MODAL ============================= -->
-<div class="modal" id="modal-zreport" hidden>
+<!-- ======================= ADD CLUB EXPENSE MODAL =====================
+     Faz E entry point. Three fields: description, amount, and a Paid By
+     dropdown that lists every active member plus a "POOL" sentinel that
+     drives pool accounting. POOL is the default — the most common case
+     for a club where money already sits in the kitty. -->
+<div class="modal" id="modal-club-expense" hidden>
   <div class="modal-backdrop"></div>
-  <div class="modal-sheet" style="max-height:85vh;">
+  <div class="modal-sheet">
     <div class="modal-handle"></div>
+    <div class="modal-title">Add Expense</div>
+    <div class="modal-body">
+      <label for="cex-desc">Description</label>
+      <input type="text" id="cex-desc" class="field" maxlength="80" placeholder="e.g. Repairs at the workshop">
+
+      <label for="cex-amount" style="margin-top:14px;">Amount ($)</label>
+      <input type="number" id="cex-amount" class="field" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00">
+
+      <label for="cex-paid-by" style="margin-top:14px;">Paid by</label>
+      <select id="cex-paid-by" class="field"></select>
+      <!-- Treasurer-specific hint: when the user picks the treasurer
+           themselves, we show a small note explaining the "pool first,
+           then personal" rule so the bookkeeping isn't a surprise. -->
+      <div id="cex-treasurer-hint" hidden style="margin-top:8px;padding:9px 11px;
+        background:rgba(10,132,255,0.10);border-radius:8px;font-size:11.5px;
+        color:var(--c-text-2);line-height:1.45;">
+        The treasurer is the same person who holds the pool. The pool will
+        cover this expense first; any remainder will be recorded as the
+        treasurer's personal contribution.
+      </div>
+
+      <div class="msg" id="cex-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="cex-cancel">Cancel</button>
+      <button class="btn btn-primary" id="cex-save">Add</button>
+    </div>
+  </div>
+</div>
     <div class="modal-title">Z-Report</div>
     <div class="modal-body">
       <div style="display:flex;gap:8px;align-items:flex-end;">
@@ -1728,7 +1761,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.15';
+var APP_VERSION = 'V2-CLUB.16';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5058,12 +5091,109 @@ function openClubLedgerAdd(){
   openModal('modal-ledger-add-chooser');
 }
 
-// Opens the existing add-expense modal scoped to the current club.
-// Phase 1: this is a thin pass-through — clubs use the same expense
-// schema as trips, so the modal works without modification.
+// Opens the new club-specific Add Expense modal — Faz E. Description,
+// amount, and a Paid By dropdown (POOL + active members), with POOL
+// selected by default. The "pre-payment" and "split between" sections
+// from the trip flow don't apply here: in a club, an expense is one
+// monetary event paid by exactly one actor (POOL or a member), with
+// no per-member split.
 function openClubAddExpense(){
   closeModal('modal-ledger-add-chooser');
-  setTimeout(function(){ openExpenseModal(null); }, 180);
+  setTimeout(_openClubExpenseModalFresh, 180);
+}
+function _openClubExpenseModalFresh(){
+  var t = state.trip;
+  if(!t) return;
+  // Reset fields and build the Paid By dropdown. POOL leads, then
+  // active members alphabetically. Inactive members are omitted —
+  // they can't legitimately be paying for club expenses while
+  // they're flagged inactive.
+  $('cex-desc').value = '';
+  $('cex-amount').value = '';
+  $('cex-msg').className = 'msg';
+  hide('cex-treasurer-hint');
+  var sel = $('cex-paid-by');
+  // The POOL option uses the literal string "pool" as its value so
+  // we can tell it apart from any directory_id without colliding with
+  // a uuid. Members below carry their directory_id as the value.
+  var html = '<option value="pool">POOL</option>';
+  var members = (t.members || []).slice()
+    .filter(function(m){ return !m.is_inactive; })
+    .sort(function(a, b){
+      return (displayName(a)||'').toLowerCase().localeCompare(
+             (displayName(b)||'').toLowerCase());
+    });
+  members.forEach(function(m){
+    var nm = displayName(m);
+    var suffix = '';
+    if(m.directory_id === t.treasurer_directory_id) suffix = ' (Treasurer)';
+    html += '<option value="'+esc(m.directory_id)+'">'+esc(nm)+esc(suffix)+'</option>';
+  });
+  sel.innerHTML = html;
+  // POOL is the spec-mandated default.
+  sel.value = 'pool';
+  hide('cex-treasurer-hint');
+  openModal('modal-club-expense');
+  setTimeout(function(){ $('cex-desc').focus(); }, 150);
+}
+
+// Selected actor changed: surface the treasurer hint when the user
+// picks the treasurer themselves, so the "pool first, then personal"
+// rule is no surprise.
+function _onClubExpensePaidByChange(){
+  var v = $('cex-paid-by').value;
+  var t = state.trip;
+  var isTreasurer = (t && t.treasurer_directory_id
+    && v === t.treasurer_directory_id);
+  if(isTreasurer) show('cex-treasurer-hint');
+  else hide('cex-treasurer-hint');
+}
+
+async function submitClubExpense(){
+  var t = state.trip;
+  if(!t) return;
+  var desc = $('cex-desc').value.trim();
+  var amt = parseFloat($('cex-amount').value);
+  var paidByVal = $('cex-paid-by').value;
+  function setMsg(text){ $('cex-msg').className='msg show err'; $('cex-msg').textContent=text; }
+  if(!desc){ setMsg('Description is required.'); return; }
+  if(!(amt > 0)){ setMsg('Enter an amount greater than zero.'); return; }
+  if(!paidByVal){ setMsg('Pick who paid.'); return; }
+
+  var paidByPool = (paidByVal === 'pool');
+  var paidByDir  = paidByPool ? null : paidByVal;
+
+  var btn = $('cex-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('add_club_expense', {
+      p_trip:         t.trip_id,
+      p_description:  desc,
+      p_amount:       amt,
+      p_paid_by_pool: paidByPool,
+      p_paid_by:      paidByDir
+    });
+    if(res.error) throw res.error;
+    // Friendly toast: if the treasurer's expense had to split into a
+    // pool portion + personal portion, mention it so the bookkeeping
+    // result is obvious without re-opening the activity feed.
+    var d = res.data || {};
+    var toastMsg = 'Expense added';
+    if(d.rows && d.rows > 1){
+      toastMsg = 'Split: '+money(d.pool_amount||0)+' from pool, '+
+                 money(d.personal_amount||0)+' personal';
+    }
+    closeModal('modal-club-expense');
+    toast(toastMsg);
+    // Invalidate the club caches so dashboards & feeds refresh.
+    state.clubDashboardLoadedFor = null;
+    state.clubLedgerLoadedFor = null;
+    state.clubMembersLoadedFor = null;
+    renderActiveTab();
+  }catch(err){
+    setMsg(err.message || 'Could not add expense.');
+  }
+  btn.disabled = false; btn.textContent = 'Add';
 }
 
 // Opens the Pool In modal so the admin/treasurer can record a donation,
@@ -8675,6 +8805,11 @@ $('md-unpaid').onclick = submitMarkDuesUnpaid;
 // Dues matrix modal close.
 $('dm-close').onclick  = function(){ closeModal('modal-dues-matrix'); };
 
+// Club expense modal wiring.
+$('cex-cancel').onclick = function(){ closeModal('modal-club-expense'); };
+$('cex-save').onclick   = submitClubExpense;
+$('cex-paid-by').onchange = _onClubExpensePaidByChange;
+
 // Ledger add chooser (Expense vs Pool In) — shown when admin/treasurer
 // taps the FAB on the Dues & Expenses tab.
 $('lac-cancel').onclick      = function(){ closeModal('modal-ledger-add-chooser'); };
@@ -8784,7 +8919,7 @@ $('ep-delete').onclick=deleteEditPerson;
 ['ep-first','ep-last','ep-email'].forEach(function(id){
   $(id).addEventListener('input', checkEditPersonChanged);
 });
-['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-zreport','modal-member-action','modal-see-members','modal-my-activity','modal-club-activity','modal-dues-claim','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
+['modal-new-trip','modal-new-chooser','modal-new-club','modal-add-club-member','modal-mark-dues','modal-dues-matrix','modal-ledger-add-chooser','modal-pool-in','modal-club-expense','modal-zreport','modal-member-action','modal-see-members','modal-my-activity','modal-club-activity','modal-dues-claim','modal-account','modal-add-person','modal-expense','modal-edit-person','modal-notif','modal-trip-switch','modal-reject','modal-rename-trip','modal-recycle','modal-expense-picker','modal-invite','modal-share','modal-breakdown','modal-pool','modal-treasurer'].forEach(function(id){
   $(id).querySelector('.modal-backdrop').onclick=function(){ closeModal(id); };
 });
 
