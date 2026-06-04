@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.21">
+<meta name="app-version" content="V2-CLUB.22">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -931,11 +931,9 @@
       <div id="pi-cat-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
         <button type="button" data-cat="donation" style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Donation</button>
         <button type="button" data-cat="rental"   style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Rental</button>
-        <button type="button" data-cat="entry_fee" style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Entry fee</button>
-        <button type="button" data-cat="dues"     style="padding:8px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--c-border);background:var(--c-card);color:var(--c-text);">Other dues</button>
       </div>
       <div style="font-size:11px;color:var(--c-text-3);margin:-8px 0 12px;line-height:1.4;">
-        For regular monthly dues, use the dues row in the list instead — that updates the member's status.
+        For dues, use "Mark paid" inside a member's profile (See Members → tap a name). For entry fees, open Edit Person and toggle "Entry fee paid".
       </div>
 
       <label for="pi-amount">Amount ($)</label>
@@ -1220,6 +1218,16 @@
       <div id="ep-trips-section" style="margin-top:18px;" hidden>
         <div class="tab-count" style="padding:0 0 6px;">Trips</div>
         <div id="ep-trips-list" class="balance-list" style="margin-bottom:0;"></div>
+      </div>
+      <!-- Entry fee (club-only). Visible when this modal was opened
+           from a club context AND the caller can manage entry fees.
+           Toggle button records the pool inflow (or its reversal). -->
+      <div id="ep-entry-fee-section" style="margin-top:18px;" hidden>
+        <div class="tab-count" style="padding:0 0 6px;">Entry fee</div>
+        <div id="ep-entry-fee-info" style="font-size:12.5px;color:var(--c-text-2);
+          line-height:1.45;margin-bottom:10px;"></div>
+        <button id="ep-entry-fee-btn" class="btn btn-secondary"
+          style="margin-top:0;width:100%;font-size:13px;"></button>
       </div>
       <!-- Withdraw / restore: only meaningful when this modal was opened
            from a trip context where the caller is admin of that trip.
@@ -1767,7 +1775,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.21';
+var APP_VERSION = 'V2-CLUB.22';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2904,10 +2912,13 @@ function _renderClubDashboardFromState(){
       // In the admin's personal-profile view we hide the duplicate
       // "See Members" button that the member layout otherwise places
       // in the top-right of its hero card — the chip bar above already
-      // exposes the same action.
+      // exposes the same action. We also surface the "Manage unpaid"
+      // card so the admin can mark their own dues paid right here,
+      // matching what See Members → <self> would look like.
       _renderClubDashboardMember(d, t, el, {
-        chipBarHtml: chipBarHtml,
-        hideSeeMembersBtn: true
+        chipBarHtml:        chipBarHtml,
+        hideSeeMembersBtn:  true,
+        showManageUnpaid:   true
       });
     } else {
       _renderClubDashboardAdmin(d, t, el, { chipBarHtml: chipBarHtml });
@@ -3154,12 +3165,21 @@ function _renderClubDashboardMember(d, t, el, opts){
   // ---- "Your status" card: explains exactly what's owed. ----
   var statusCard;
   var unpaidPeriods = d.my_unpaid_periods || [];
+  // Entry fee owed lives outside the monthly dues stream. We surface
+  // it as an additional line in the status card so it's never silent.
+  var entryFeeOwed = Number(d.my_entry_fee_owed || 0);
+  var entryFeeLine = entryFeeOwed > 0
+    ? '<div style="font-size:11.5px;color:var(--c-text-2);margin-top:6px;'+
+        'padding-top:6px;border-top:1px dashed var(--c-border);">'+
+        '<strong>Also owes:</strong> '+money(entryFeeOwed)+' entry fee'+
+      '</div>'
+    : '';
   // Distinguish "current month not yet paid" from "overdue months". The
   // current month being unpaid is normal until it gets paid; truly
   // overdue months are the ones the member should worry about.
   var overdue = unpaidPeriods.filter(function(p){ return p.period < nowPeriod; });
   var thisMonth = unpaidPeriods.filter(function(p){ return p.period === nowPeriod; });
-  if(unpaidPeriods.length === 0){
+  if(unpaidPeriods.length === 0 && entryFeeOwed === 0){
     statusCard =
       '<div style="background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.32);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
         '<div style="display:flex;align-items:center;gap:10px;">'+
@@ -3169,6 +3189,18 @@ function _renderClubDashboardMember(d, t, el, opts){
           '<div>'+
             '<div style="font-size:15px;font-weight:700;color:#30d158;">Paid — All caught up</div>'+
             '<div style="font-size:12px;color:var(--c-text-2);margin-top:1px;">Nothing owed right now.</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  } else if(unpaidPeriods.length === 0 && entryFeeOwed > 0){
+    // Special case: dues are caught up but entry fee is still unpaid.
+    statusCard =
+      '<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.34);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
+        '<div style="display:flex;align-items:center;gap:10px;">'+
+          '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#ff9f0a;color:#fff;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;">○</span>'+
+          '<div>'+
+            '<div style="font-size:15px;font-weight:700;color:#ff9f0a;">Entry fee unpaid</div>'+
+            '<div style="font-size:13px;color:var(--c-text);margin-top:2px;">Dues are current, but the entry fee of <strong>'+money(entryFeeOwed)+'</strong> is still owed.</div>'+
           '</div>'+
         '</div>'+
       '</div>';
@@ -3191,19 +3223,22 @@ function _renderClubDashboardMember(d, t, el, opts){
             '<div style="font-size:15px;font-weight:700;color:'+color+';">'+esc(headline)+'</div>'+
             '<div style="font-size:13px;color:var(--c-text);margin-top:2px;"><strong>'+money(d.my_unpaid_total||0)+'</strong> across '+unpaidPeriods.length+' month'+(unpaidPeriods.length===1?'':'s')+'</div>'+
             '<div style="font-size:11px;color:var(--c-text-3);margin-top:3px;">'+esc(monthNames)+'</div>'+
+            entryFeeLine +
           '</div>'+
         '</div>'+
       '</div>';
   }
 
-  // ---- Viewing mode: actionable "Mark paid" list -----------------------
-  // When an admin is looking at another member's profile, the unpaid
-  // months become directly actionable from here. Each row opens the
-  // mark-dues-paid modal pre-filled with that period. On the member's
-  // own dashboard this section is omitted — members can't mark their
-  // own dues paid; they go through the "I paid dues" claim flow.
+  // ---- Viewing mode / admin's own profile: actionable "Mark paid" list
+  // When an admin is looking at another member's profile OR at their
+  // own My Profile view, the unpaid months become directly actionable.
+  // Each row opens the mark-dues-paid modal pre-filled with that
+  // period. On a regular member's own dashboard this section stays
+  // hidden — members can't mark their own dues paid; they go through
+  // the "I paid dues" claim flow which routes through the admin.
+  var canManagePaid = (opts.isViewing || opts.showManageUnpaid);
   var manageUnpaidCard = '';
-  if(opts.isViewing && unpaidPeriods.length > 0){
+  if(canManagePaid && unpaidPeriods.length > 0){
     var manageRows = '';
     unpaidPeriods.forEach(function(p){
       var statusLbl, statusColor;
@@ -3299,10 +3334,43 @@ function _renderClubDashboardMember(d, t, el, opts){
 
   el.innerHTML = backBar + heroCard + statusCard + manageUnpaidCard + recentCard;
 
-  // Viewing-mode Mark-paid wiring. Each row carries the dues_id; the
-  // click opens the existing mark-dues-paid modal pre-loaded with the
-  // target member's name and the period state.
-  if(opts.isViewing){
+  // Member ring segments are click-to-inspect (Note 9). Tapping a
+  // segment shows a quick status toast — "May 2026: paid $25" /
+  // "March 2026: $25 owed". We deliberately don't open a modal here
+  // because the spec keeps the member ring read-only; the toast gives
+  // the user the same one-line summary at a glance.
+  el.querySelectorAll('[data-mr-period]').forEach(function(p){
+    p.onclick = function(){
+      var label = p.dataset.mrLabel || p.dataset.mrPeriod;
+      var status = p.dataset.mrStatus;
+      var amt = parseFloat(p.dataset.mrAmount) || 0;
+      var paid = parseFloat(p.dataset.mrPaid) || 0;
+      var msg;
+      // Capitalize the FMMonth so "January" stays "January" rather than
+      // becoming "january".
+      var pretty = label.charAt(0).toUpperCase() + label.slice(1);
+      if(status === 'paid'){
+        msg = pretty + ': paid ' + money(paid || amt);
+      } else if(status === 'partial'){
+        msg = pretty + ': ' + money(paid) + ' paid of ' + money(amt) +
+              ' — ' + money(amt - paid) + ' left';
+      } else if(status === 'current'){
+        msg = pretty + ': current month — ' + money(amt) + ' due';
+      } else if(status === 'unpaid'){
+        msg = pretty + ': ' + money(amt) + ' owed';
+      } else if(status === 'future'){
+        msg = pretty + ': not billed yet';
+      } else {
+        msg = pretty + ': not a member';
+      }
+      toast(msg);
+    };
+  });
+
+  // Viewing-mode / own-profile Mark-paid wiring. Each row carries the
+  // dues_id; the click opens the existing mark-dues-paid modal pre-
+  // loaded with the target's name and the period state.
+  if(canManagePaid){
     el.querySelectorAll('[data-mark-dues-id]').forEach(function(b){
       b.onclick = function(){
         var duesId = b.dataset.markDuesId;
@@ -3366,7 +3434,8 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     // even before the halo animation kicks in.
     var isPulse = !!(opts.pulsePeriod && m.period === opts.pulsePeriod);
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
-      isPulse ? thickness + 6 : thickness, m.label || '');
+      isPulse ? thickness + 6 : thickness, m.label || '',
+      m.period, m.status, m.amount, m.paid_amount);
     if(isPulse){
       // Reuse the admin halo helper — same "heartbeat" cue everywhere.
       halos += _clubHaloArc(cx, cy, r + thickness/2 + 6, startDeg, endDeg);
@@ -3410,7 +3479,8 @@ function _statusOpacity(status){
   // pops without the ring looking incomplete.
   return (status === 'future' || status === 'not_member') ? 0.28 : 1;
 }
-function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label){
+function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
+                  period, status, amount, paidAmount){
   function pt(angleDeg){
     var a = angleDeg * Math.PI / 180;
     return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
@@ -3423,8 +3493,20 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label){
   // need the status object passed in twice.
   var opacity = (color === '#3a3a3c') ? 0.28 : 1;
   var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
+  // Extra data attributes drive the click-to-inspect behavior added
+  // in V2-CLUB.22 — the dispatcher reads data-mr-period and friends
+  // to surface a "May 2026: paid $25" toast on member rings.
+  var extra = '';
+  if(period){
+    extra += ' data-mr-period="'+esc(period)+'"';
+    if(status) extra += ' data-mr-status="'+esc(status)+'"';
+    if(amount != null) extra += ' data-mr-amount="'+esc(String(amount))+'"';
+    if(paidAmount != null) extra += ' data-mr-paid="'+esc(String(paidAmount))+'"';
+    if(label) extra += ' data-mr-label="'+esc(label)+'"';
+    extra += ' style="cursor:pointer;"';
+  }
   return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
-         '" stroke-linecap="round" fill="none" opacity="'+opacity+'">'+
+         '" stroke-linecap="round" fill="none" opacity="'+opacity+'"'+extra+'>'+
          (label ? '<title>'+esc(label)+'</title>' : '') +
          '</path>';
 }
@@ -3448,7 +3530,18 @@ function openMemberAction(){
 }
 function memberPickAddExpense(){
   closeModal('modal-member-action');
-  setTimeout(function(){ openExpenseModal(null); }, 180);
+  setTimeout(function(){
+    // In a club we always use the club-specific expense modal so the
+    // Pre-payment / Split Between fields from the trip flow never
+    // appear here. The club modal's Paid By dropdown adapts to the
+    // caller's role: an admin/treasurer can charge POOL or any
+    // member, while a regular member is locked to their own row.
+    if(state.trip && state.trip.kind === 'club'){
+      _openClubExpenseModalFresh();
+    } else {
+      openExpenseModal(null);
+    }
+  }, 180);
 }
 function memberPickPaidDues(){
   closeModal('modal-member-action');
@@ -3844,7 +3937,21 @@ function _activityRowHtml(ev){
     sub = 'Paid by ' + (ev.actor || '—');
   } else if(ev.kind === 'pool_in'){
     sign = '+'; color = '#30d158';
-    lbl = ev.description || _clubCategoryLabel(ev.category);
+    if(ev.category === 'dues'){
+      // SQL 52 bridge means every paid dues row is also a prepayment
+      // row with description "Dues for <month>". Relabel for clarity:
+      // "Dues paid — <month>" reads as a settled event rather than
+      // an open request. Negative deltas (adjustments) keep their
+      // suffix so the audit trail stays understandable.
+      var match = (ev.description || '').match(/^Dues (?:for|reversal —) (.+?)(\s*\(adjustment\))?$/);
+      if(match){
+        lbl = 'Dues paid — ' + match[1] + (match[2] ? match[2] : '');
+      } else {
+        lbl = ev.description || 'Dues paid';
+      }
+    } else {
+      lbl = (ev.description || _clubCategoryLabel(ev.category));
+    }
     sub = 'From ' + (ev.actor || '—');
   } else {
     sign = '+'; color = '#30d158';
@@ -3949,11 +4056,39 @@ async function openMyDuesClaim(){
       '<select id="dc-month" class="field">'+opts+'</select>'+
       '<label for="dc-amount" style="margin-top:14px;">Amount paid ($)</label>'+
       '<input type="number" id="dc-amount" class="field" min="0" step="0.01">'+
-      '<div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">'+
-        'Defaults to the full balance for the picked month. Edit if you only paid part of it.'+
+      '<div id="dc-amount-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">'+
+        'Defaults to the full balance for the picked month. Paying less marks the month as partial; paying more is capped at the full amount — extra goes into the pool but no future month is credited automatically.'+
       '</div>'+
       '<label for="dc-note" style="margin-top:14px;">Note (optional)</label>'+
       '<input type="text" id="dc-note" class="field" maxlength="200" placeholder="e.g. Venmo on May 18">';
+
+    // Helper updates the contextual hint as the user types / picks a
+    // different month. It compares the typed amount against the month's
+    // outstanding balance and adds a clear cue for over/under.
+    function _updateDuesClaimHint(){
+      var hint = $('dc-amount-hint'); if(!hint) return;
+      var o = $('dc-month').selectedOptions[0];
+      var balance = o ? Number(o.dataset.amt || 0) : 0;
+      var typed = parseFloat($('dc-amount').value);
+      var base = 'Defaults to the full balance for the picked month.';
+      if(!o || isNaN(typed) || typed <= 0){
+        hint.textContent = base + ' Paying less marks the month partial; over-paying is not allowed.';
+        hint.style.color = 'var(--c-text-3)';
+        return;
+      }
+      if(typed < balance - 0.005){
+        hint.innerHTML = '<strong>Partial payment:</strong> '+money(typed)+' of '+money(balance)+
+          ' — '+money(balance - typed)+' will remain owed for this month.';
+        hint.style.color = '#ff9f0a';
+      } else if(typed > balance + 0.005){
+        hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. The form will submit '+
+          money(balance)+' (the full balance). Adjust if you meant otherwise.';
+        hint.style.color = '#ff453a';
+      } else {
+        hint.innerHTML = 'Full payment for the month: '+money(balance)+'.';
+        hint.style.color = '#30d158';
+      }
+    }
     // When the month changes, default the amount to that row's balance.
     $('dc-month').addEventListener('change', function(){
       var o = $('dc-month').selectedOptions[0];
@@ -3963,7 +4098,9 @@ async function openMyDuesClaim(){
         $('dc-amount').value = '';
       }
       $('dc-submit').disabled = !o || !o.value;
+      _updateDuesClaimHint();
     });
+    $('dc-amount').addEventListener('input', _updateDuesClaimHint);
   }catch(err){
     $('dc-body').innerHTML =
       '<div class="empty"><div class="empty-title">Could not load</div>'+
@@ -3978,6 +4115,15 @@ async function submitMyDuesClaim(){
   function setMsg(t){ $('dc-msg').className='msg show err'; $('dc-msg').textContent=t; }
   if(!duesId){ setMsg('Pick a month.'); return; }
   if(!(amt > 0)){ setMsg('Enter the amount you paid.'); return; }
+  // Cap to the month's outstanding balance — overpaying a single
+  // month doesn't credit forward and would just confuse the admin
+  // reviewing the claim. The hint in the form already warned about
+  // this; we enforce it here so a stale value can't slip through.
+  var opt = sel && sel.selectedOptions[0];
+  var balance = opt ? Number(opt.dataset.amt || 0) : 0;
+  if(balance > 0 && amt > balance + 0.005){
+    amt = balance;
+  }
   var btn = $('dc-submit');
   btn.disabled = true; btn.textContent = 'Submitting…';
   try{
@@ -4177,7 +4323,17 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       lbl = ev.description || 'Expense';
     } else if(ev.kind === 'pool_in'){
       sign = '+'; color = '#30d158';
-      lbl = (ev.description || _clubCategoryLabel(ev.category));
+      if(ev.category === 'dues'){
+        // Relabel dues-flavoured prepayments as "Dues paid — <month>"
+        // so the row reads as a settled event. See _activityRowHtml
+        // for the same logic in the View All Activity modal.
+        var matchA = (ev.description || '').match(/^Dues (?:for|reversal —) (.+?)(\s*\(adjustment\))?$/);
+        lbl = matchA
+          ? 'Dues paid — ' + matchA[1] + (matchA[2] ? matchA[2] : '')
+          : (ev.description || 'Dues paid');
+      } else {
+        lbl = (ev.description || _clubCategoryLabel(ev.category));
+      }
     } else {
       sign = '+'; color = '#30d158';
       lbl = 'Dues paid — ' + (ev.period_label || '');
@@ -5302,34 +5458,55 @@ function openClubAddExpense(){
 function _openClubExpenseModalFresh(){
   var t = state.trip;
   if(!t) return;
-  // Reset fields and build the Paid By dropdown. POOL leads, then
-  // active members alphabetically. Inactive members are omitted —
-  // they can't legitimately be paying for club expenses while
-  // they're flagged inactive.
+  // Reset fields and build the Paid By dropdown. Role-aware:
+  //   - admin / treasurer / GA → POOL + every active member, POOL default
+  //   - plain member            → just themselves (locked), no POOL
+  // We compute the effective role exactly like setActiveTab does so a
+  // global admin previewing as a member sees the member-side form.
   $('cex-desc').value = '';
   $('cex-amount').value = '';
   $('cex-msg').className = 'msg';
   hide('cex-treasurer-hint');
   var sel = $('cex-paid-by');
-  // The POOL option uses the literal string "pool" as its value so
-  // we can tell it apart from any directory_id without colliding with
-  // a uuid. Members below carry their directory_id as the value.
-  var html = '<option value="pool">POOL</option>';
+
+  var canChargePool = !!(t.is_admin || state.is_treasurer);
+  var isGA = !!(state.profile && state.profile.is_global_admin);
+  if(isGA && getClubViewAs() === 'member') canChargePool = false;
+
+  var html = '';
+  if(canChargePool){
+    // POOL only appears for admin / treasurer — it's the club's
+    // collective money and shouldn't be touched by a regular member.
+    html += '<option value="pool">POOL</option>';
+  }
   var members = (t.members || []).slice()
-    .filter(function(m){ return !m.is_inactive; })
-    .sort(function(a, b){
-      return (displayName(a)||'').toLowerCase().localeCompare(
-             (displayName(b)||'').toLowerCase());
+    .filter(function(m){ return !m.is_inactive; });
+  // Members other than the caller are dropped for non-admin callers so
+  // the form can't be used to record an expense "on behalf of" someone
+  // else (backend enforces this too, but the UI shouldn't even offer it).
+  if(!canChargePool && t.my_directory_id){
+    members = members.filter(function(m){
+      return m.directory_id === t.my_directory_id;
     });
+  }
+  members.sort(function(a, b){
+    return (displayName(a)||'').toLowerCase().localeCompare(
+           (displayName(b)||'').toLowerCase());
+  });
   members.forEach(function(m){
     var nm = displayName(m);
     var suffix = '';
     if(m.directory_id === t.treasurer_directory_id) suffix = ' (Treasurer)';
+    if(m.is_me)                                     suffix = ' (You)';
     html += '<option value="'+esc(m.directory_id)+'">'+esc(nm)+esc(suffix)+'</option>';
   });
   sel.innerHTML = html;
-  // POOL is the spec-mandated default.
-  sel.value = 'pool';
+  // Default: POOL for admins, self for members.
+  if(canChargePool) sel.value = 'pool';
+  else              sel.value = t.my_directory_id || '';
+  // Member-side: lock the dropdown so the only option is the caller
+  // themselves. Visually still readable, just not changeable.
+  sel.disabled = !canChargePool;
   hide('cex-treasurer-hint');
   openModal('modal-club-expense');
   setTimeout(function(){ $('cex-desc').focus(); }, 150);
@@ -7524,6 +7701,10 @@ async function openEditPerson(dirId){
     // view AND the caller is admin of that trip AND the target is a
     // non-admin member of it.
     setupWithdrawSection(p);
+    // Entry fee toggle (clubs only). Same gating idea as withdraw —
+    // we surface it only when the modal was opened from a club whose
+    // caller can manage members.
+    setupEntryFeeSection(p);
     // Delete button: always visible to global admin; but the actual
     // deletion is blocked if the person is in an active trip or has any
     // expense history. When blocked, the trash icon stays but is faded;
@@ -7546,6 +7727,71 @@ async function openEditPerson(dirId){
   }catch(err){
     closeModal('modal-edit-person');
     toast(err.message||'Could not load person', true);
+  }
+}
+
+// Entry-fee section (Edit Person, club context only). Surfaces a
+// "Mark entry fee paid" / "Mark entry fee unpaid" toggle for the
+// active club. Visible to the trip admin or treasurer; uses
+// state.trip.members for the current paid flag.
+function setupEntryFeeSection(p){
+  hide('ep-entry-fee-section');
+  var t = state.trip;
+  if(!t || t.kind !== 'club') return;
+  var canManage = !!(t.is_admin || state.is_treasurer);
+  var isGA = !!(state.profile && state.profile.is_global_admin);
+  if(!canManage && !isGA) return;
+  var member = (t.members||[]).find(function(m){
+    return m.directory_id === p.directory_id;
+  });
+  if(!member) return;
+  var fee = Number(t.entry_fee_amount) || 0;
+  if(fee <= 0) return;   // club has no configured entry fee → nothing to do
+
+  var paid = !!member.entry_fee_paid;
+  var btn = $('ep-entry-fee-btn');
+  var info = $('ep-entry-fee-info');
+  if(paid){
+    info.innerHTML = 'Entry fee of <strong>'+money(fee)+'</strong> has been paid. '+
+      'Marking it unpaid records a reversal in the pool — use with care.';
+    btn.textContent = 'Mark entry fee unpaid';
+    btn.style.color = 'var(--c-danger)';
+    btn.style.background = 'rgba(255,59,48,0.10)';
+    btn.style.borderColor = 'transparent';
+    btn.onclick = function(){ doMarkEntryFee(p.directory_id, false); };
+  } else {
+    info.innerHTML = 'This member owes <strong>'+money(fee)+'</strong> for the entry fee. '+
+      'Marking it paid records the inflow against the club pool.';
+    btn.textContent = 'Mark entry fee paid';
+    btn.style.color = 'var(--c-success)';
+    btn.style.background = 'rgba(48,209,88,0.10)';
+    btn.style.borderColor = 'transparent';
+    btn.onclick = function(){ doMarkEntryFee(p.directory_id, true); };
+  }
+  show('ep-entry-fee-section');
+}
+
+async function doMarkEntryFee(dirId, paid){
+  var t = state.trip;
+  if(!t) return;
+  var btn = $('ep-entry-fee-btn');
+  btn.disabled = true; btn.textContent = paid ? 'Marking…' : 'Reversing…';
+  try{
+    var rpc = paid ? 'mark_entry_fee_paid' : 'mark_entry_fee_unpaid';
+    var res = await sb.rpc(rpc, { p_trip: t.trip_id, p_dir: dirId });
+    if(res.error) throw res.error;
+    toast(paid ? 'Entry fee marked paid' : 'Entry fee reversed');
+    closeModal('modal-edit-person');
+    // Invalidate every cached read so the dashboard, ledger, and
+    // members list all reflect the new state.
+    state.clubDashboardLoadedFor = null;
+    state.clubLedgerLoadedFor    = null;
+    state.clubMembersLoadedFor   = null;
+    // Pull a fresh state.trip snapshot so member.entry_fee_paid flips.
+    reloadTrip();
+  }catch(err){
+    toast(err.message || 'Could not update entry fee', true);
+    btn.disabled = false;
   }
 }
 
