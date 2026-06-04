@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.24">
+<meta name="app-version" content="V2-CLUB.25">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1775,7 +1775,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.24';
+var APP_VERSION = 'V2-CLUB.25';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4024,7 +4024,7 @@ function _updateDuesClaimHint(){
   var typed   = amtEl ? parseFloat(amtEl.value) : NaN;
   if(!o || !o.value || isNaN(typed) || typed <= 0){
     hint.textContent = 'Defaults to the full balance for the picked month. '+
-      'Paying less marks the month partial; over-paying is capped.';
+      'Paying less marks the month partial; paying more rolls forward to the next unpaid month(s).';
     hint.style.color = 'var(--c-text-3)';
     return;
   }
@@ -4033,9 +4033,13 @@ function _updateDuesClaimHint(){
       ' — '+money(balance - typed)+' will remain owed for this month.';
     hint.style.color = '#ff9f0a';
   } else if(typed > balance + 0.005){
-    hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. '+
-      'The form will submit '+money(balance)+' (the full balance). Adjust if you meant otherwise.';
-    hint.style.color = '#ff453a';
+    // Roll-forward: backend mark_dues_paid distributes the extra
+    // across subsequent unpaid months for this member. If there's not
+    // enough future capacity, the RPC raises and the user sees the
+    // error in the form.
+    hint.innerHTML = '<strong>Rolls forward:</strong> '+money(balance)+' covers this month; the extra '+
+      money(typed - balance)+' will be applied to the next unpaid month(s) automatically.';
+    hint.style.color = '#30d158';
   } else {
     hint.innerHTML = 'Full payment for the month: '+money(balance)+'.';
     hint.style.color = '#30d158';
@@ -4128,15 +4132,9 @@ async function submitMyDuesClaim(){
   function setMsg(t){ $('dc-msg').className='msg show err'; $('dc-msg').textContent=t; }
   if(!duesId){ setMsg('Pick a month.'); return; }
   if(!(amt > 0)){ setMsg('Enter the amount you paid.'); return; }
-  // Cap to the month's outstanding balance — overpaying a single
-  // month doesn't credit forward and would just confuse the admin
-  // reviewing the claim. The hint in the form already warned about
-  // this; we enforce it here so a stale value can't slip through.
-  var opt = sel && sel.selectedOptions[0];
-  var balance = opt ? Number(opt.dataset.amt || 0) : 0;
-  if(balance > 0 && amt > balance + 0.005){
-    amt = balance;
-  }
+  // No client-side cap: the backend now rolls extras forward across
+  // subsequent unpaid months. If there isn't enough future capacity
+  // it raises a clear error message which we surface in setMsg().
   var btn = $('dc-submit');
   btn.disabled = true; btn.textContent = 'Submitting…';
   try{
@@ -5001,7 +4999,8 @@ function _updateMarkDuesHint(){
               ? Number(amtEl.dataset.full) : 0;
   var typed = amtEl ? parseFloat(amtEl.value) : NaN;
   if(!full || isNaN(typed) || typed <= 0){
-    hint.textContent = 'Enter the full amount due to mark as paid, or a smaller value for a partial payment.';
+    hint.textContent = 'Enter the full amount due to mark as paid, less for a partial payment, '+
+      'or more to roll the excess forward into subsequent unpaid months.';
     hint.style.color = 'var(--c-text-3)';
     return;
   }
@@ -5010,9 +5009,11 @@ function _updateMarkDuesHint(){
       ' — '+money(full - typed)+' will remain owed.';
     hint.style.color = '#ff9f0a';
   } else if(typed > full + 0.005){
-    hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. '+
-      'The pool will receive '+money(full)+' (the full amount). Adjust if you meant otherwise.';
-    hint.style.color = '#ff453a';
+    // Backend mark_dues_paid distributes the extra across subsequent
+    // unpaid months for the same member. Raises if there's no room.
+    hint.innerHTML = '<strong>Rolls forward:</strong> '+money(full)+' covers this month; the extra '+
+      money(typed - full)+' will be applied to the next unpaid month(s) automatically.';
+    hint.style.color = '#30d158';
   } else {
     hint.innerHTML = 'Full payment: '+money(full)+'.';
     hint.style.color = '#30d158';
@@ -5024,14 +5025,10 @@ async function submitMarkDuesPaid(){
   var notes = $('md-notes').value.trim() || null;
   function setMsg(t){ $('md-msg').className='msg show err'; $('md-msg').textContent=t; }
   if(!(amt > 0)){ setMsg('Enter an amount greater than zero.'); return; }
-  // Cap to the row's full amount so a typo can't overflow into the
-  // pool. Backend mark_dues_paid does this too, but enforcing it on
-  // the client keeps the recorded value aligned with what the admin
-  // sees in the modal.
-  var fullCap = parseFloat($('md-amount').dataset.full || '0');
-  if(fullCap > 0 && amt > fullCap + 0.005){
-    amt = fullCap;
-  }
+  // No client-side cap: backend mark_dues_paid rolls over-payments
+  // forward across subsequent unpaid months for the same member.
+  // The hint above the input previews the same behaviour; the
+  // backend raises a clean error if there's not enough future room.
   var btn = $('md-save');
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
