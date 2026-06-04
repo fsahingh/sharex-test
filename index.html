@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.27">
+<meta name="app-version" content="V2-CLUB.28">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1017,37 +1017,85 @@
 </div>
 
 <!-- ======================= MARK DUES MODAL =========================== -->
-<!-- ======================= EDIT DUES PAYMENT MODAL ===================== -->
-<!-- Opened by tapping a dues-paid row in the activity feed. Admin and
-     treasurer only. Three actions in one form: change the amount,
-     move the payment to a different member/month, or delete it
-     outright (with confirmation). Audit log entries are written for
-     every successful save / delete so the change is traceable. -->
-<div class="modal" id="modal-edit-dues" hidden>
+<!-- ======================= EDIT TRANSACTION MODAL ===================== -->
+<!-- Generic edit modal for every money row shown in the activity feed:
+     expenses, entry fees, donations, rentals, dues payments. Form
+     fields adapt at open time based on the row's kind+category:
+       - Dues: Member + Month + Amount
+       - Entry fee: Member + Amount
+       - Expense: Description + Amount + Paid By (+ POOL toggle)
+       - Donation/Rental: Description + Amount + Paid By
+     A read-only "type chip" at the top reminds the operator which kind
+     of row they're editing. Admin / treasurer only — server enforces. -->
+<div class="modal" id="modal-edit-transaction" hidden>
   <div class="modal-backdrop"></div>
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <div class="modal-title">Edit dues payment</div>
+    <div class="modal-title">Edit transaction</div>
     <div class="modal-body">
+      <div id="et-type-chip" style="display:inline-block;padding:4px 10px;
+        border-radius:10px;font-size:11px;font-weight:600;
+        background:var(--c-bg);color:var(--c-text-2);margin-bottom:14px;"></div>
       <div style="font-size:11.5px;color:var(--c-text-3);line-height:1.5;margin-bottom:14px;">
-        Change the member, month, or amount, or delete this payment.
-        Reversals are logged in the activity feed.
+        Edit the fields you need to change, or delete the row to reverse the transaction.
+        Changes are logged in the activity feed.
       </div>
-      <label for="ed-member">Member</label>
-      <select id="ed-member" class="field"></select>
-      <label for="ed-period" style="margin-top:14px;">Month</label>
-      <select id="ed-period" class="field"></select>
-      <label for="ed-amount" style="margin-top:14px;">Amount ($)</label>
-      <input type="number" id="ed-amount" class="field" min="0" step="0.01">
-      <div id="ed-amount-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">
-        Amount must fit within the target month's remaining capacity.
+
+      <!-- Description: expense / donation / rental -->
+      <div id="et-desc-row" hidden>
+        <label for="et-description">Description</label>
+        <input type="text" id="et-description" class="field" maxlength="200">
       </div>
-      <div class="msg" id="ed-msg"></div>
+
+      <!-- Member dropdown: every kind except POOL-flagged expenses -->
+      <div id="et-member-row" hidden>
+        <label for="et-member" style="margin-top:14px;">Member</label>
+        <select id="et-member" class="field"></select>
+      </div>
+
+      <!-- Period dropdown: dues only -->
+      <div id="et-period-row" hidden>
+        <label for="et-period" style="margin-top:14px;">Month</label>
+        <select id="et-period" class="field"></select>
+      </div>
+
+      <label for="et-amount" style="margin-top:14px;">Amount ($)</label>
+      <input type="number" id="et-amount" class="field" min="0" step="0.01">
+      <div id="et-amount-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;"></div>
+
+      <!-- POOL toggle: expenses only -->
+      <div id="et-pool-row" hidden style="margin-top:14px;display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="et-pool-toggle" style="width:18px;height:18px;">
+        <label for="et-pool-toggle" style="margin:0;font-size:13px;">Charged to POOL</label>
+      </div>
+
+      <div class="msg" id="et-msg"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-secondary" id="ed-cancel">Cancel</button>
-      <button class="btn btn-danger" id="ed-delete">Delete</button>
-      <button class="btn btn-primary" id="ed-save">Save</button>
+      <button class="btn btn-secondary" id="et-cancel">Cancel</button>
+      <button class="btn btn-danger" id="et-delete">Delete</button>
+      <button class="btn btn-primary" id="et-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= POOL BREAKDOWN MODAL ====================== -->
+<!-- Opens when the user taps the Pool Balance label/value on the
+     admin Club view hero card. Shows year-by-year inflow and outflow
+     breakdown with category detail, plus all-time / end-of-year
+     running balances so carry-forward is explicit. Read-only. -->
+<div class="modal" id="modal-pool-breakdown" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:85vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Pool balance breakdown</div>
+    <div class="modal-body" style="overflow-y:auto;">
+      <label for="pb-year" style="margin-bottom:6px;">Year</label>
+      <select id="pb-year" class="field" style="margin-bottom:14px;"></select>
+      <div id="pb-body" style="min-height:140px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="pb-close">Close</button>
     </div>
   </div>
 </div>
@@ -1811,7 +1859,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.27';
+var APP_VERSION = 'V2-CLUB.28';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4001,17 +4049,16 @@ function _activityRowHtml(ev){
     lbl = 'Dues paid';
     sub = (ev.actor || '—') + ' &middot; ' + (ev.period_label || '');
   }
-  // Admin / treasurer can edit a dues-payment row by tapping it. We
-  // attach the prepayment ref + actor dir + dues_link_id as data
-  // attributes; the wiring code reads them and opens the edit modal.
-  // Non-editable rows (expenses, audit, donations, rentals) render
-  // exactly as before — no cursor, no hover, no handler.
-  var editable = (ev.kind === 'pool_in' && ev.category === 'dues' && ev.ref);
+  // Admin / treasurer can edit any money row by tapping it. The
+  // payload is encoded as JSON inside data-edit-ev so the click
+  // handler can pass the full event shape to openEditTransaction.
+  // Audit rows stay inert. Negative-amount prepayments (reversals)
+  // are also non-editable — they're a side effect of a prior delete
+  // and shouldn't be edited independently.
+  var editable = (ev.kind === 'expense' || ev.kind === 'pool_in') &&
+                 ev.ref && (ev.amount === undefined || Number(ev.amount) > 0);
   var extraAttrs = editable
-    ? ' data-edit-prepayment="'+esc(ev.ref)+'"'+
-      ' data-edit-actor-dir="'+esc(ev.actor_dir||'')+'"'+
-      ' data-edit-dues-id="'+esc(ev.dues_link_id||'')+'"'+
-      ' data-edit-amount="'+esc(String(ev.amount||0))+'"'
+    ? ' data-edit-ev="'+esc(JSON.stringify(ev))+'"'
     : '';
   var when = ev.at ? new Date(ev.at).toLocaleTimeString(undefined,
     { hour:'numeric', minute:'2-digit' }) : '';
@@ -4076,6 +4123,34 @@ function _auditLabel(ev){
           money(Number(oldA)) + ' to ' + money(Number(newA));
       }
       return actor + ' edited a dues payment for ' + target;
+    }
+    case 'transaction_deleted': {
+      // Generic edit RPC; payload.kind + .category tell us what it
+      // was. Audit reads the payload to keep the phrasing on-brand.
+      var k = payload.category || payload.kind || 'transaction';
+      var oldAmt = payload.amount != null ? ' (' + money(Number(payload.amount)) + ')' : '';
+      var label = k === 'dues'      ? 'a dues payment'
+                : k === 'entry_fee' ? 'an entry fee'
+                : k === 'donation'  ? 'a donation'
+                : k === 'rental'    ? 'a rental income entry'
+                : k === 'expense'   ? 'an expense'
+                : 'a transaction';
+      return actor + ' deleted ' + label + ' for ' + target + oldAmt;
+    }
+    case 'transaction_edited': {
+      var ek = payload.category || payload.kind || 'transaction';
+      var elabel = ek === 'dues'      ? 'a dues payment'
+                 : ek === 'entry_fee' ? 'an entry fee'
+                 : ek === 'donation'  ? 'a donation'
+                 : ek === 'rental'    ? 'a rental income entry'
+                 : ek === 'expense'   ? 'an expense'
+                 : 'a transaction';
+      if(payload.old_amount != null && payload.new_amount != null &&
+         Math.abs(payload.old_amount - payload.new_amount) > 0.005){
+        return actor + ' changed ' + target + '\'s ' + elabel + ' from '+
+          money(Number(payload.old_amount)) + ' to ' + money(Number(payload.new_amount));
+      }
+      return actor + ' edited ' + elabel + ' for ' + target;
     }
     default:
       return actor + ' performed ' + (ev.action || 'an action');
@@ -4318,7 +4393,9 @@ function _renderClubDashboardAdmin(d, t, el, opts){
 
   var infoPanel =
     '<div style="flex:1;min-width:170px;display:flex;flex-direction:column;gap:12px;">'+
-      _statRow('Pool Balance', money(d.pool_balance||0)) +
+      _statRow('Pool Balance', money(d.pool_balance||0),
+               { id:'ss-pool-balance', clickable:true,
+                 hint:'tap for breakdown' }) +
       _statRow('Over Dues '+esc((d.year||'')+''),
                money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
                { hint:'collected of billed' }) +
@@ -4429,14 +4506,13 @@ function _renderClubDashboardAdmin(d, t, el, opts){
     }
     var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
       {month:'short', day:'numeric'}) : '';
-    // Dues rows (pool_in + dues category) are editable by the admin
-    // through this row. Other kinds stay non-interactive.
-    var rowEditable = (ev.kind === 'pool_in' && ev.category === 'dues' && ev.ref);
+    // Any money row (expense or pool_in with positive amount) is
+    // editable by an admin/treasurer; reversal prepayments (negative
+    // amount) and audit rows stay inert.
+    var rowEditable = (ev.kind === 'expense' || ev.kind === 'pool_in') &&
+                      ev.ref && Number(ev.amount) > 0;
     var rowExtraAttrs = rowEditable
-      ? ' data-edit-prepayment="'+esc(ev.ref)+'"'+
-        ' data-edit-actor-dir="'+esc(ev.actor_dir||'')+'"'+
-        ' data-edit-dues-id="'+esc(ev.dues_link_id||'')+'"'+
-        ' data-edit-amount="'+esc(String(ev.amount||0))+'"'
+      ? ' data-edit-ev="'+esc(JSON.stringify(ev))+'"'
       : '';
     recentRows +=
       '<div'+rowExtraAttrs+' style="display:flex;align-items:center;justify-content:space-between;'+
@@ -4474,6 +4550,12 @@ function _renderClubDashboardAdmin(d, t, el, opts){
 
   // Tap a dues-paid row in Recent activity to open the edit modal.
   _wireEditDuesClicks(el);
+
+  // Pool Balance row opens a year-by-year breakdown modal.
+  var poolEl = el.querySelector('#ss-pool-balance');
+  if(poolEl){
+    poolEl.onclick = function(){ openPoolBreakdown(); };
+  }
 
   // -----  Wire interactions  -----
   // 1. Ring segments: select a month.
@@ -4535,10 +4617,19 @@ function _statRow(label, value, opts){
   opts = opts || {};
   var color = opts.color || 'var(--c-text)';
   var hint = opts.hint ? '<div style="font-size:10px;color:var(--c-text-3);margin-top:1px;">'+esc(opts.hint)+'</div>' : '';
-  return '<div>'+
+  // Clickable variant: a subtle right-arrow glyph telegraphs that the
+  // row opens a modal. We keep the structure the same so the layout
+  // doesn't shift between clickable and static rows.
+  var idAttr = opts.id ? ' id="'+esc(opts.id)+'"' : '';
+  var wrapStyle = opts.clickable ? 'cursor:pointer;' : '';
+  var arrow = opts.clickable
+    ? '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>'
+    : '';
+  return '<div'+idAttr+' style="'+wrapStyle+'">'+
     '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
           'text-transform:uppercase;letter-spacing:0.5px;">'+esc(label)+'</div>'+
-    '<div style="font-size:18px;font-weight:800;margin-top:2px;color:'+color+';">'+value+'</div>'+
+    '<div style="font-size:18px;font-weight:800;margin-top:2px;color:'+color+';'+
+          'display:inline-flex;align-items:center;">'+value+arrow+'</div>'+
     hint +
     '</div>';
 }
@@ -5112,95 +5203,153 @@ function _updateMarkDuesHint(){
 }
 
 // =====================================================================
-//  EDIT DUES PAYMENT MODAL (admin / treasurer only)
+//  EDIT TRANSACTION MODAL (admin / treasurer only) — generic
 // =====================================================================
-// Opened by tapping a dues-paid row in any activity feed (dashboard
-// "Recent activity" or View All Activity). The modal lets the operator
-// change the member, the month, or the amount, or delete the payment
-// entirely. Everything goes through one backend RPC, revise_dues_payment.
+// Opened by tapping any money row in the activity feed: expenses,
+// entry fees, donations, rentals, dues payments. Form fields adapt
+// to the row's kind+category so the modal looks "just right" for
+// each case while routing through one backend RPC (revise_transaction).
 //
-// state.editDues tracks the prepayment we're working with so submit
-// handlers don't need to re-derive it from DOM.
+// state.editTx tracks the row we're working with so submit handlers
+// don't need to re-derive context from DOM.
 
-state.editDues = null;
+state.editTx = null;
 
-async function openEditDuesPayment(prepaymentId, ev){
-  if(!prepaymentId) return;
+// Look up the row in state.trip.members / activity payload to figure
+// out which UI bits to show. Caller supplies the activity event row
+// (we get amount, kind, category, etc.) plus the expense id (ref).
+async function openEditTransaction(ev){
+  if(!ev || !ev.ref) return;
   var t = state.trip;
   if(!t) return;
-  // Server-side gate exists; we still hide the entry point on the
-  // client for anyone outside admin / treasurer / global admin.
   var canEdit = !!(t.is_admin || state.is_treasurer ||
                    (state.profile && state.profile.is_global_admin));
   if(!canEdit) return;
 
-  // If the View All Activity modal is sitting on top, close it first.
-  // The edit modal would otherwise open behind it (both share a modal
-  // class), and the user has to dismiss Activity manually before
-  // reaching the form. After the edit completes the dashboards get
-  // refreshed; the user can re-open Activity if they still need it.
+  // Close View All Activity if it's stacked on top.
   var actEl = document.getElementById('modal-club-activity');
-  if(actEl && !actEl.hidden){
-    closeModal('modal-club-activity');
-  }
+  if(actEl && !actEl.hidden){ closeModal('modal-club-activity'); }
 
-  // Reset action-button state. The modal element is reused across
-  // opens, so a prior submit left disabled / "Saving…" / "Deleting…"
-  // labels behind. Restore clean state every time we open.
-  var saveBtn = $('ed-save');
+  // Reset button labels — element reuse means a prior submit might
+  // have left them disabled / mid-text.
+  var saveBtn = $('et-save');
   if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
-  var delBtn = $('ed-delete');
+  var delBtn = $('et-delete');
   if(delBtn){ delBtn.disabled = false; delBtn.textContent = 'Delete'; }
+  $('et-msg').className = 'msg';
 
-  // Cache the prepayment shape for submit handlers.
-  state.editDues = {
-    prepaymentId: prepaymentId,
-    originalAmount: Number(ev && ev.amount) || 0,
-    originalMemberDir: ev && ev.actor_dir,
-    originalDuesId: ev && ev.dues_link_id
+  // Classify the row. Backend keeps source-of-truth columns; here we
+  // need to know what to show. The activity payload carries kind +
+  // category + description + amount + actor_dir + dues_link_id.
+  var kind = ev.kind;
+  var category = ev.category;
+  var isDues    = (kind === 'pool_in' && category === 'dues');
+  var isEntry   = (kind === 'pool_in' && category === 'entry_fee');
+  var isExpense = (kind === 'expense');
+  // donations + rentals are the remaining pool_in flavours
+  var isDonRental = (kind === 'pool_in' &&
+                     (category === 'donation' || category === 'rental'));
+
+  // Default field visibility per type.
+  var showDesc   = isExpense || isDonRental;
+  var showMember = !isExpense || !ev.is_pool;   // POOL expenses don't have a member
+  var showPeriod = isDues;
+  var showPool   = isExpense;
+
+  $('et-desc-row').hidden   = !showDesc;
+  $('et-member-row').hidden = !showMember;
+  $('et-period-row').hidden = !showPeriod;
+  $('et-pool-row').hidden   = !showPool;
+
+  // Type chip text — colour stays neutral; the label conveys context.
+  var typeLabel = isDues     ? 'Dues payment'
+                : isEntry    ? 'Entry fee'
+                : isExpense  ? 'Expense'
+                : (category === 'donation' ? 'Donation'
+                : (category === 'rental'   ? 'Rental income'
+                : 'Pool inflow'));
+  $('et-type-chip').textContent = typeLabel;
+
+  // Cache row context for submit handlers.
+  state.editTx = {
+    id:          ev.ref,
+    kind:        kind,
+    category:    category,
+    isDues:      isDues,
+    isEntry:     isEntry,
+    isExpense:   isExpense,
+    isDonRental: isDonRental,
+    originalAmount:    Number(ev.amount) || 0,
+    originalMemberDir: ev.actor_dir || null,
+    originalDuesId:    ev.dues_link_id || null,
+    originalDescription: ev.description || '',
+    originalPaidByPool: !!ev.is_pool
   };
 
-  // Build the member dropdown. Active members only (an inactive
-  // member is unlikely to be a dues-payment target).
-  var sel = $('ed-member');
-  var members = (t.members || []).slice()
-    .filter(function(m){ return !m.is_inactive; })
-    .sort(function(a, b){
-      return (displayName(a)||'').toLowerCase().localeCompare(
-             (displayName(b)||'').toLowerCase());
+  // Pre-fill: simple fields first
+  $('et-description').value = ev.description || '';
+  $('et-amount').value      = Number(ev.amount || 0).toFixed(2);
+  $('et-pool-toggle').checked = !!ev.is_pool;
+
+  // Member dropdown (every row except POOL-only expense).
+  if(showMember){
+    var sel = $('et-member');
+    var members = (t.members || []).slice()
+      .filter(function(m){ return !m.is_inactive; })
+      .sort(function(a, b){
+        return (displayName(a)||'').toLowerCase().localeCompare(
+               (displayName(b)||'').toLowerCase());
+      });
+    var html = '';
+    members.forEach(function(m){
+      html += '<option value="'+esc(m.directory_id)+'">'+esc(displayName(m))+'</option>';
     });
-  var html = '';
-  members.forEach(function(m){
-    html += '<option value="'+esc(m.directory_id)+'">'+esc(displayName(m))+'</option>';
-  });
-  sel.innerHTML = html;
-  sel.value = state.editDues.originalMemberDir || (members[0] && members[0].directory_id) || '';
+    sel.innerHTML = html;
+    sel.value = ev.actor_dir || (members[0] && members[0].directory_id) || '';
+    // For dues, member change reloads the period dropdown.
+    if(isDues){
+      sel.onchange = function(){ _refreshEditTxPeriods(false); };
+    } else {
+      sel.onchange = null;
+    }
+  }
 
-  // Reset shape; the period dropdown is repopulated as soon as we
-  // know which member is selected.
-  $('ed-period').innerHTML = '<option value="">— loading —</option>';
-  $('ed-amount').value = '';
-  $('ed-msg').className = 'msg';
-  hide('ed-delete');     // re-shown once we know the row is real
+  // Period dropdown (dues only)
+  if(showPeriod){
+    $('et-period').innerHTML = '<option value="">— loading —</option>';
+    $('et-period').onchange = _updateEditTxHint;
+    await _refreshEditTxPeriods(true);
+  } else {
+    $('et-period').onchange = null;
+  }
 
-  // Wire change handlers exactly once per open. We use direct property
-  // assignment (onchange, oninput) so re-opening replaces the previous
-  // bindings instead of stacking them.
-  sel.onchange = function(){ _refreshEditDuesPeriods(false); };
-  $('ed-period').onchange = _updateEditDuesHint;
-  $('ed-amount').oninput  = _updateEditDuesHint;
-  $('ed-amount').onchange = _updateEditDuesHint;
+  // Amount listeners
+  $('et-amount').oninput  = _updateEditTxHint;
+  $('et-amount').onchange = _updateEditTxHint;
+  // POOL toggle on expense changes member visibility (POOL = no member).
+  if(showPool){
+    $('et-pool-toggle').onchange = function(){
+      // When the operator flips an expense to POOL, the member
+      // dropdown becomes meaningless; we hide it to mirror Add
+      // Expense's UI. Flipping back shows it again.
+      $('et-member-row').hidden = $('et-pool-toggle').checked;
+    };
+    // Initial sync
+    $('et-member-row').hidden = $('et-pool-toggle').checked;
+  } else {
+    $('et-pool-toggle').onchange = null;
+  }
 
-  openModal('modal-edit-dues');
-  await _refreshEditDuesPeriods(true);   // initial population
+  _updateEditTxHint();
+  openModal('modal-edit-transaction');
 }
 
-// Repopulates the Period dropdown for whoever's selected in ed-member.
-// On first open (isFirst) we pre-select the original dues row and
-// pre-fill amount from the prepayment.
-async function _refreshEditDuesPeriods(isFirst){
-  var sel = $('ed-member');
-  if(!sel.value){ $('ed-period').innerHTML = '<option value="">— pick a member —</option>'; return; }
+// Periods picker for the dues path (mirrors get_member_dues_picker
+// usage from the old edit-dues modal).
+async function _refreshEditTxPeriods(isFirst){
+  if(!state.editTx || !state.editTx.isDues) return;
+  var sel = $('et-member');
+  if(!sel.value){ $('et-period').innerHTML = '<option value="">— pick a member —</option>'; return; }
   var t = state.trip;
   try{
     var res = await sb.rpc('get_member_dues_picker', {
@@ -5208,19 +5357,12 @@ async function _refreshEditDuesPeriods(isFirst){
     });
     if(res.error) throw res.error;
     var items = (res.data && res.data.items) || [];
-    var psel = $('ed-period');
+    var psel = $('et-period');
     var opts = '<option value="">— pick a month —</option>';
     items.forEach(function(it){
-      // Capacity = full amount minus the OTHER prepayments already
-      // linked to this dues row (i.e. excluding ours). When the user
-      // keeps the original member+month, the row we'll free up via
-      // edit is the current prepayment, so its slot is still
-      // "available" to us. Tell the dropdown about it through
-      // data-capacity (the hint reads this).
       var alreadyLinked = Number(it.already_linked) || 0;
-      var ours = (state.editDues
-                  && String(it.dues_id) === String(state.editDues.originalDuesId))
-                  ? state.editDues.originalAmount : 0;
+      var ours = (String(it.dues_id) === String(state.editTx.originalDuesId))
+                  ? state.editTx.originalAmount : 0;
       var availableForUs = (Number(it.amount) - alreadyLinked) + ours;
       opts += '<option value="'+esc(it.dues_id)+'"'+
         ' data-full="'+esc(String(it.amount))+'"'+
@@ -5235,143 +5377,292 @@ async function _refreshEditDuesPeriods(isFirst){
         '</option>';
     });
     psel.innerHTML = opts;
-    if(isFirst && state.editDues && state.editDues.originalDuesId){
-      psel.value = state.editDues.originalDuesId;
-      $('ed-amount').value = Number(state.editDues.originalAmount || 0).toFixed(2);
-      show('ed-delete');
+    if(isFirst && state.editTx.originalDuesId){
+      psel.value = state.editTx.originalDuesId;
     }
-    _updateEditDuesHint();
+    _updateEditTxHint();
   }catch(err){
-    $('ed-msg').className = 'msg show err';
-    $('ed-msg').textContent = err.message || 'Could not load months';
+    $('et-msg').className = 'msg show err';
+    $('et-msg').textContent = err.message || 'Could not load months';
   }
 }
 
-// Hint helper: shows whether the typed amount fits in the target
-// month's remaining capacity (excluding our own row when it's being
-// edited in place).
-function _updateEditDuesHint(){
-  var hint = $('ed-amount-hint'); if(!hint) return;
-  var amtEl = $('ed-amount');
-  var psel  = $('ed-period');
-  var o = psel ? psel.selectedOptions[0] : null;
-  if(!o || !o.value){
-    hint.textContent = 'Pick a month first.';
-    hint.style.color = 'var(--c-text-3)';
-    return;
-  }
-  var full     = Number(o.dataset.full)     || 0;
-  var capacity = Number(o.dataset.capacity) || 0;
-  var typed    = amtEl ? parseFloat(amtEl.value) : NaN;
-  if(isNaN(typed) || typed <= 0){
-    hint.textContent = 'Up to '+money(capacity)+' available in '+(o.dataset.label||'this month')+'.';
-    hint.style.color = 'var(--c-text-3)';
-    return;
-  }
-  if(typed > capacity + 0.005){
-    hint.innerHTML = '<strong>Exceeds capacity:</strong> '+(o.dataset.label||'')+
-      ' has '+money(capacity)+' left. Lower the amount or pick another month.';
-    hint.style.color = '#ff453a';
-  } else if(typed < full - 0.005){
-    hint.innerHTML = 'Partial payment for '+(o.dataset.label||'this month')+
-      ' — '+money(full - typed)+' would still be owed.';
-    hint.style.color = '#ff9f0a';
+// Hint mirrors the per-kind context:
+//   - dues:    capacity check against the selected month
+//   - other:   no cap, just confirms the number is greater than zero
+function _updateEditTxHint(){
+  var hint = $('et-amount-hint'); if(!hint || !state.editTx) return;
+  var typed = parseFloat($('et-amount').value);
+  if(state.editTx.isDues){
+    var psel = $('et-period');
+    var o = psel ? psel.selectedOptions[0] : null;
+    if(!o || !o.value){
+      hint.textContent = 'Pick a month first.';
+      hint.style.color = 'var(--c-text-3)';
+      return;
+    }
+    var full     = Number(o.dataset.full)     || 0;
+    var capacity = Number(o.dataset.capacity) || 0;
+    if(isNaN(typed) || typed <= 0){
+      hint.textContent = 'Up to '+money(capacity)+' available in '+(o.dataset.label||'this month')+'.';
+      hint.style.color = 'var(--c-text-3)';
+      return;
+    }
+    if(typed > capacity + 0.005){
+      hint.innerHTML = '<strong>Exceeds capacity:</strong> '+(o.dataset.label||'')+
+        ' has '+money(capacity)+' left. Lower the amount or pick another month.';
+      hint.style.color = '#ff453a';
+    } else if(typed < full - 0.005){
+      hint.innerHTML = 'Partial payment for '+(o.dataset.label||'this month')+
+        ' — '+money(full - typed)+' would still be owed.';
+      hint.style.color = '#ff9f0a';
+    } else {
+      hint.innerHTML = 'Full payment for '+(o.dataset.label||'this month')+'.';
+      hint.style.color = '#30d158';
+    }
   } else {
-    hint.innerHTML = 'Full payment for '+(o.dataset.label||'this month')+'.';
-    hint.style.color = '#30d158';
+    if(isNaN(typed) || typed <= 0){
+      hint.textContent = 'Amount must be greater than zero.';
+      hint.style.color = 'var(--c-text-3)';
+    } else {
+      hint.textContent = '';
+    }
   }
 }
 
-async function doSaveEditDuesPayment(){
-  var ctx = state.editDues; if(!ctx) return;
-  var amt = parseFloat($('ed-amount').value);
-  var duesId = $('ed-period').value;
-  function setMsg(t){ $('ed-msg').className='msg show err'; $('ed-msg').textContent=t; }
-  if(!duesId){ setMsg('Pick a month.'); return; }
+async function doSaveEditTransaction(){
+  var ctx = state.editTx; if(!ctx) return;
+  var amt = parseFloat($('et-amount').value);
+  function setMsg(t){ $('et-msg').className='msg show err'; $('et-msg').textContent=t; }
   if(!(amt > 0)){ setMsg('Enter an amount.'); return; }
-  var btn = $('ed-save');
+
+  var args = { p_expense_id: ctx.id, p_op: 'edit', p_amount: amt };
+
+  if(ctx.isDues){
+    var duesId = $('et-period').value;
+    if(!duesId){ setMsg('Pick a month.'); return; }
+    args.p_new_dues_id = duesId;
+  } else if(ctx.isExpense){
+    args.p_description  = $('et-description').value.trim();
+    args.p_paid_by_pool = !!$('et-pool-toggle').checked;
+    if(!args.p_paid_by_pool){
+      // Non-POOL expense needs a member.
+      var mem = $('et-member').value;
+      if(!mem){ setMsg('Pick a member.'); return; }
+      args.p_paid_by = mem;
+    } else {
+      // POOL: backend ignores paid_by but we still send treasurer
+      // implicitly by leaving paid_by null (RPC keeps original on null).
+      args.p_paid_by = null;
+    }
+  } else if(ctx.isEntry){
+    var memE = $('et-member').value;
+    if(!memE){ setMsg('Pick a member.'); return; }
+    args.p_paid_by = memE;
+  } else {
+    // donation / rental
+    args.p_description = $('et-description').value.trim();
+    var memD = $('et-member').value;
+    if(!memD){ setMsg('Pick a member.'); return; }
+    args.p_paid_by = memD;
+  }
+
+  var btn = $('et-save');
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    var res = await sb.rpc('revise_dues_payment', {
-      p_prepayment_id: ctx.prepaymentId,
-      p_new_dues_id:   duesId,
-      p_new_amount:    amt
-    });
+    var res = await sb.rpc('revise_transaction', args);
     if(res.error) throw res.error;
-    toast('Payment updated');
-    closeModal('modal-edit-dues');
-    state.editDues = null;
-    _afterEditDuesRefresh();
+    toast('Transaction updated');
+    closeModal('modal-edit-transaction');
+    state.editTx = null;
+    _afterEditTxRefresh();
   }catch(err){
     setMsg(err.message || 'Could not save');
     btn.disabled = false; btn.textContent = 'Save';
   }
 }
 
-async function doDeleteEditDuesPayment(){
-  var ctx = state.editDues; if(!ctx) return;
+async function doDeleteEditTransaction(){
+  var ctx = state.editTx; if(!ctx) return;
   var ok = await alertModal(
-    'Delete this payment? It will reverse the pool inflow and reopen '+
-    'the dues month for this member. The action is logged in the activity feed.',
+    'Delete this transaction? '+
+    (ctx.isDues     ? 'The pool inflow will reverse and the dues month reopens.'
+    : ctx.isEntry   ? 'The pool inflow will reverse and the entry fee will be marked unpaid.'
+    : ctx.isExpense ? 'The expense row will be removed and the pool balance will reflect the reversal if it was charged to POOL.'
+    :                 'The pool inflow will reverse.'),
     { confirm:true, danger:true, confirmLabel:'Delete' });
   if(!ok) return;
-  var btn = $('ed-delete');
+  var btn = $('et-delete');
   btn.disabled = true; btn.textContent = 'Deleting…';
   try{
-    var res = await sb.rpc('revise_dues_payment', {
-      p_prepayment_id: ctx.prepaymentId,
-      p_new_dues_id:   null,
-      p_new_amount:    null
+    var res = await sb.rpc('revise_transaction', {
+      p_expense_id: ctx.id, p_op: 'delete'
     });
     if(res.error) throw res.error;
-    toast('Payment deleted');
-    closeModal('modal-edit-dues');
-    state.editDues = null;
-    _afterEditDuesRefresh();
+    toast('Transaction deleted');
+    closeModal('modal-edit-transaction');
+    state.editTx = null;
+    _afterEditTxRefresh();
   }catch(err){
-    $('ed-msg').className = 'msg show err';
-    $('ed-msg').textContent = err.message || 'Could not delete';
+    $('et-msg').className = 'msg show err';
+    $('et-msg').textContent = err.message || 'Could not delete';
     btn.disabled = false; btn.textContent = 'Delete';
   }
 }
 
-// Common refresh path after an edit or delete. Wipes the relevant
-// caches so the dashboard, ledger, members tab, and any open viewing
-// profile all reflect the change.
-function _afterEditDuesRefresh(){
+function _afterEditTxRefresh(){
   state.clubDashboardLoadedFor = null;
   state.clubLedgerLoadedFor    = null;
   state.clubMembersLoadedFor   = null;
   if(state.viewingMember && state.viewingMember.directory_id){
-    // Re-fetch the viewing-mode payload from scratch so the ring,
-    // unpaid list, and recent feed all rebuild.
     openMemberProfileView(state.viewingMember.directory_id);
   } else {
     renderActiveTab();
   }
 }
 
-// Wires data-edit-prepayment rows inside a container to open the
-// edit-dues-payment modal. Used by the dashboard's recent activity
-// card and the View All Activity modal. We attach the actor_dir and
-// dues_link_id as data attrs at render time so the click handler has
-// all it needs without re-fetching.
-function _wireEditDuesClicks(containerEl){
+// Wires every editable activity row inside a container. Activity rows
+// flagged with data-edit-ref carry the activity event payload as JSON
+// in data-edit-ev so the click handler can pass it through to the
+// modal without re-fetching.
+function _wireEditTxClicks(containerEl){
   if(!containerEl) return;
   var t = state.trip;
   if(!t) return;
   var canEdit = !!(t.is_admin || state.is_treasurer ||
                    (state.profile && state.profile.is_global_admin));
-  if(!canEdit) return;   // non-admin sees inert rows
-  containerEl.querySelectorAll('[data-edit-prepayment]').forEach(function(row){
+  if(!canEdit) return;
+  containerEl.querySelectorAll('[data-edit-ev]').forEach(function(row){
     row.onclick = function(){
-      openEditDuesPayment(row.dataset.editPrepayment, {
-        amount:       parseFloat(row.dataset.editAmount) || 0,
-        actor_dir:    row.dataset.editActorDir || null,
-        dues_link_id: row.dataset.editDuesId || null
-      });
+      try{
+        var ev = JSON.parse(row.dataset.editEv);
+        openEditTransaction(ev);
+      }catch(err){ console.error('bad data-edit-ev payload', err); }
     };
   });
+}
+
+// Back-compat shim: existing callers of _wireEditDuesClicks still
+// exist in the codebase; route them through the generic wire.
+function _wireEditDuesClicks(el){ _wireEditTxClicks(el); }
+
+// =====================================================================
+//  POOL BALANCE BREAKDOWN MODAL
+// =====================================================================
+// Opened by tapping the Pool Balance label / value on the admin Club
+// view hero card. Shows a year picker and, for the selected year,
+// inflow (per category) + outflow + a running pool balance line.
+// Pure information surface — no actions. Cache the latest payload
+// on state so the year dropdown change doesn't refetch the same year.
+
+state.poolBreakdown = null;
+
+async function openPoolBreakdown(){
+  var t = state.trip; if(!t) return;
+  $('pb-body').innerHTML =
+    '<div class="center-spin"><div class="spinner"></div></div>';
+  openModal('modal-pool-breakdown');
+  await _loadPoolBreakdown(null);    // null → backend defaults to current year
+}
+
+async function _loadPoolBreakdown(year){
+  var t = state.trip; if(!t) return;
+  try{
+    var args = { p_trip: t.trip_id };
+    if(year != null) args.p_year = year;
+    var res = await sb.rpc('get_club_pool_breakdown', args);
+    if(res.error) throw res.error;
+    state.poolBreakdown = res.data;
+    _renderPoolBreakdown();
+  }catch(err){
+    $('pb-body').innerHTML =
+      '<div class="empty" style="padding:24px 6px;">'+
+        '<div class="empty-title">Could not load</div>'+
+        '<div class="empty-sub">'+esc(err.message || 'Unknown error')+'</div>'+
+      '</div>';
+  }
+}
+
+function _renderPoolBreakdown(){
+  var d = state.poolBreakdown; if(!d) return;
+  // Populate year dropdown. Selected = current year by default.
+  var yrSel = $('pb-year');
+  var optsHtml = '';
+  (d.available_years || []).forEach(function(y){
+    optsHtml += '<option value="'+esc(String(y))+'"'+
+      (y === d.year ? ' selected' : '')+'>'+esc(String(y))+'</option>';
+  });
+  yrSel.innerHTML = optsHtml;
+
+  var c = d.collected || {};
+  var s = d.spent || {};
+  // Helper for the breakdown row layout used three times here.
+  function _r(label, val, sub){
+    return '<div style="display:flex;justify-content:space-between;'+
+        'align-items:baseline;padding:6px 0;border-top:1px solid var(--c-border);">'+
+      '<span style="font-size:12.5px;color:var(--c-text-2);">'+esc(label)+'</span>'+
+      '<span style="font-size:13px;font-weight:700;color:var(--c-text);">'+val+
+        (sub ? '<span style="font-size:10.5px;color:var(--c-text-3);font-weight:400;'+
+                  'margin-left:6px;">'+esc(sub)+'</span>' : '')+
+      '</span>'+
+    '</div>';
+  }
+  function _section(title, total, totalColor){
+    return '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.5px;margin-top:18px;'+
+        'display:flex;justify-content:space-between;align-items:baseline;">'+
+      '<span>'+esc(title)+'</span>'+
+      '<span style="font-size:15px;font-weight:800;color:'+(totalColor||'var(--c-text)')+';">'+
+        money(total)+'</span>'+
+    '</div>';
+  }
+
+  var html = '';
+  // COLLECTED block
+  html += _section('Collected', c.total || 0, '#30d158');
+  html += '<div style="margin-top:4px;">'+
+    _r('Dues',       money(c.dues      || 0)) +
+    _r('Entry fees', money(c.entry_fee || 0)) +
+    _r('Donations',  money(c.donation  || 0)) +
+    _r('Rentals',    money(c.rental    || 0)) +
+  '</div>';
+
+  // SPENT block
+  html += _section('Spent', s.total || 0, '#ff453a');
+  html += '<div style="margin-top:4px;">'+
+    _r('From pool',           money(s.pool     || 0)) +
+    _r('Out-of-pocket',       money(s.personal || 0),
+       'doesn\'t affect pool') +
+  '</div>';
+
+  // NET line for the selected year (pool flows only).
+  var netColor = (d.net_year >= 0) ? '#30d158' : '#ff453a';
+  html += '<div style="margin-top:22px;padding-top:14px;border-top:2px solid var(--c-border);'+
+      'display:flex;justify-content:space-between;align-items:baseline;">'+
+    '<span style="font-size:13px;font-weight:700;color:var(--c-text);">Net '+esc(String(d.year))+'</span>'+
+    '<span style="font-size:17px;font-weight:800;color:'+netColor+';">'+
+      (d.net_year >= 0 ? '+' : '')+money(d.net_year || 0)+'</span>'+
+  '</div>';
+
+  // Running balance through end of selected year — a useful "you
+  // ended this year with $X in the pool" line.
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;'+
+      'margin-top:8px;font-size:12.5px;color:var(--c-text-2);">'+
+    '<span>Pool balance through end of '+esc(String(d.year))+'</span>'+
+    '<span style="font-weight:700;color:var(--c-text);">'+money(d.pool_balance_eoy || 0)+'</span>'+
+  '</div>';
+
+  // All-time pool balance — the value the user sees on the hero card.
+  // Surfaced explicitly so the carry-forward across years is clear.
+  html += '<div style="margin-top:18px;padding:12px 14px;background:var(--c-bg);'+
+      'border-radius:var(--r);display:flex;justify-content:space-between;align-items:baseline;">'+
+    '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.5px;">Pool balance (all time)</span>'+
+    '<span style="font-size:18px;font-weight:800;color:var(--c-text);">'+
+      money(d.pool_balance_all_time || 0)+'</span>'+
+  '</div>';
+
+  $('pb-body').innerHTML = html;
 }
 
 async function submitMarkDuesPaid(){
@@ -9651,12 +9942,15 @@ $('acm-save').onclick = saveAddClubMember;
 $('md-cancel').onclick = function(){ closeModal('modal-mark-dues'); };
 $('md-save').onclick   = submitMarkDuesPaid;
 $('md-unpaid').onclick = submitMarkDuesUnpaid;
-$('ed-cancel').onclick = function(){
-  closeModal('modal-edit-dues');
-  state.editDues = null;
+$('et-cancel').onclick = function(){
+  closeModal('modal-edit-transaction');
+  state.editTx = null;
 };
-$('ed-save').onclick   = doSaveEditDuesPayment;
-$('ed-delete').onclick = doDeleteEditDuesPayment;
+$('et-save').onclick   = doSaveEditTransaction;
+$('et-delete').onclick = doDeleteEditTransaction;
+// Pool balance breakdown modal close button.
+$('pb-close').onclick  = function(){ closeModal('modal-pool-breakdown'); };
+$('pb-year').onchange  = function(){ _loadPoolBreakdown(parseInt($('pb-year').value, 10)); };
 // Dues matrix modal close.
 $('dm-close').onclick  = function(){ closeModal('modal-dues-matrix'); };
 
