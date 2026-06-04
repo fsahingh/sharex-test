@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.30">
+<meta name="app-version" content="V2-CLUB.31">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.30';
+var APP_VERSION = 'V2-CLUB.31';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3293,9 +3293,10 @@ function _renderClubDashboardMember(d, t, el, opts){
         // Left — avatar + ring
         '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
           ringSvg +
-          '<div style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
+          '<div data-mr-reset="1" style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
             'display:flex;align-items:center;justify-content:center;'+
-            'font-size:36px;font-weight:700;color:var(--c-text);">'+esc(meInitials)+'</div>'+
+            'font-size:36px;font-weight:700;color:var(--c-text);'+
+            'cursor:pointer;">'+esc(meInitials)+'</div>'+
         '</div>'+
         // Right — personal read-outs
         '<div style="min-width:0;display:flex;flex-direction:column;gap:14px;">'+
