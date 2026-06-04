@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.31">
+<meta name="app-version" content="V2-CLUB.32">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.31';
+var APP_VERSION = 'V2-CLUB.32';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3412,7 +3412,23 @@ function _renderClubDashboardMember(d, t, el, opts){
   // longer rendered — instead a yellow/red highlighted status card
   // serves as the entry point, and tapping it opens the modal which
   // holds the row-by-row "Mark paid →" buttons.
-  var canManagePaid = (opts.isViewing || opts.showManageUnpaid);
+  //
+  // We accept both the explicit opts flags AND the caller's
+  // admin/treasurer/global role as evidence that this person can
+  // manage payments. This makes the card work even if a future code
+  // path forgets to pass the opts flag through.
+  var roleHasMgmt = !!(
+    (t && t.is_admin) ||
+    state.is_treasurer ||
+    (state.profile && state.profile.is_global_admin)
+  );
+  // "View as member" simulates the member-side UI; suppress mgmt power
+  // when the admin is previewing the member experience.
+  var simMember = (typeof getClubViewAs === 'function')
+    ? (getClubViewAs() === 'member')
+    : false;
+  var canManagePaid = (opts.isViewing || opts.showManageUnpaid ||
+                       (roleHasMgmt && !simMember));
   var manageUnpaidCard = '';   // intentionally empty; modal owns this UI now
   // Cache enough context that the status-card click handler can open
   // the modal without re-deriving anything. Member-side rendering is
