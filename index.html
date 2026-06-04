@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.26">
+<meta name="app-version" content="V2-CLUB.27">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1811,7 +1811,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.26';
+var APP_VERSION = 'V2-CLUB.27';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5133,6 +5133,24 @@ async function openEditDuesPayment(prepaymentId, ev){
   var canEdit = !!(t.is_admin || state.is_treasurer ||
                    (state.profile && state.profile.is_global_admin));
   if(!canEdit) return;
+
+  // If the View All Activity modal is sitting on top, close it first.
+  // The edit modal would otherwise open behind it (both share a modal
+  // class), and the user has to dismiss Activity manually before
+  // reaching the form. After the edit completes the dashboards get
+  // refreshed; the user can re-open Activity if they still need it.
+  var actEl = document.getElementById('modal-club-activity');
+  if(actEl && !actEl.hidden){
+    closeModal('modal-club-activity');
+  }
+
+  // Reset action-button state. The modal element is reused across
+  // opens, so a prior submit left disabled / "Saving…" / "Deleting…"
+  // labels behind. Restore clean state every time we open.
+  var saveBtn = $('ed-save');
+  if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+  var delBtn = $('ed-delete');
+  if(delBtn){ delBtn.disabled = false; delBtn.textContent = 'Delete'; }
 
   // Cache the prepayment shape for submit handlers.
   state.editDues = {
