@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.28">
+<meta name="app-version" content="V2-CLUB.29">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -896,7 +896,7 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </span>
         <span style="flex:1;min-width:0;">
-          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Expense</span>
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Add Expense</span>
           <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Money out of the pool — purchases, bills, repairs.</span>
         </span>
       </button>
@@ -973,6 +973,17 @@
 
       <label for="cex-paid-by" style="margin-top:14px;">Paid by</label>
       <select id="cex-paid-by" class="field"></select>
+      <!-- Member-only locked display. Replaces the dropdown when the
+           caller is a regular member (admin/treasurer/global keep the
+           dropdown). Shown via _openClubExpenseModalFresh. -->
+      <div id="cex-paid-by-locked" hidden style="padding:10px 12px;
+        background:var(--c-bg);border-radius:8px;font-size:13px;
+        color:var(--c-text);">
+        Paid by <strong>You</strong>
+        <div style="font-size:11px;color:var(--c-text-3);margin-top:2px;line-height:1.4;font-weight:400;">
+          Members can only add expenses on their own behalf. Ask an admin or treasurer for other cases.
+        </div>
+      </div>
       <!-- Treasurer-specific hint: when the user picks the treasurer
            themselves, we show a small note explaining the "pool first,
            then personal" rule so the bookkeeping isn't a surprise. -->
@@ -1101,6 +1112,44 @@
 </div>
 
 <!-- ======================= MARK DUES PAID MODAL ====================== -->
+<!-- ======================= MEMBER POOL BREAKDOWN ===================== -->
+<!-- Opened by tapping the "Contributed in <Y>" or "Spent in <Y>" cards
+     on the member view. Shows category-level inflows and the year's
+     out-of-pocket spending plus all-time totals. Read-only. -->
+<div class="modal" id="modal-member-breakdown" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:85vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Your contribution &amp; spending</div>
+    <div class="modal-body" style="overflow-y:auto;">
+      <label for="mb-year" style="margin-bottom:6px;">Year</label>
+      <select id="mb-year" class="field" style="margin-bottom:14px;"></select>
+      <div id="mb-body" style="min-height:140px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="mb-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MANAGE UNPAID MODAL ======================= -->
+<!-- Opened by tapping the yellow/red status card on the member view.
+     Lists the member's outstanding months as "Mark paid →" buttons;
+     each one opens modal-mark-dues for the matching dues row. The
+     modal is gated by canManagePaid in the renderer (admin viewing
+     a member, or the admin's own profile view). -->
+<div class="modal" id="modal-manage-unpaid" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:80vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Manage unpaid</div>
+    <div class="modal-body" id="mu-body" style="overflow-y:auto;min-height:120px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="mu-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-mark-dues" hidden>
   <div class="modal-backdrop"></div>
   <div class="modal-sheet">
@@ -1859,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.28';
+var APP_VERSION = 'V2-CLUB.29';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3135,11 +3184,15 @@ function _renderClubDashboardMember(d, t, el, opts){
   // at different scales.
   var ringSize = _clubRingSize();
   var ringStroke = (ringSize >= 240) ? 16 : 14;
+  // Selected period for the member ring follows the same "tap to
+  // select, tap centre to reset" pattern as the admin club ring.
+  // We keep the selection in a separate state key so the two surfaces
+  // don't fight each other when the admin switches views.
+  var memberSelected = state.memberSelectedMonth || null;
   var ringSvg = _renderYearRingSvg(months, ringSize, ringStroke, 4, {
     showLabels: true,
-    // The current month gets the same animated halo cue we use on the
-    // admin Club view — keeps the two surfaces visually consistent.
-    pulsePeriod: d.current_period
+    pulsePeriod: d.current_period,
+    selectedPeriod: memberSelected
   });
 
   // ---- Viewing-mode header (admin viewing another member) ----
@@ -3192,10 +3245,28 @@ function _renderClubDashboardMember(d, t, el, opts){
   // here — it's a club-level financial fact that the spec restricts to
   // the Club View (admins/treasurer only). My Profile / member screens
   // surface personal contribution and the current month label instead.
+  // Both Contributed and Spent rows are tappable for any caller — the
+  // breakdown modal enforces the same per-member auth backend-side.
+  var contribValue = Number(d.my_year_contributed || 0);
+  var memberDirHint = d.directory_id || (state.viewingMember && state.viewingMember.directory_id) || (t && t.my_directory_id);
   var contributionCard = (d.my_year_contributed != null)
-    ? '<div>'+
+    ? '<div id="member-contrib-card" style="cursor:pointer;" '+
+          'data-mb-dir="'+esc(memberDirHint||'')+'" data-mb-year="'+esc(String(year||''))+'">'+
         '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Contributed in '+year+'</div>'+
-        '<div style="font-size:22px;font-weight:800;margin-top:2px;">'+money(d.my_year_contributed||0)+'</div>'+
+        '<div style="font-size:22px;font-weight:800;margin-top:2px;display:inline-flex;align-items:center;">'+
+          money(contribValue) +
+          '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
+        '</div>'+
+        // Spent row underneath. Starts hidden; the async backfill
+        // toggles visibility once we know the year's spent total.
+        '<div id="member-spent-row" hidden style="margin-top:10px;cursor:pointer;" '+
+          'data-mb-dir="'+esc(memberDirHint||'')+'" data-mb-year="'+esc(String(year||''))+'">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Spent in '+year+'</div>'+
+          '<div style="font-size:18px;font-weight:800;margin-top:2px;color:#ff453a;display:inline-flex;align-items:center;">'+
+            '<span id="member-spent-value">—</span>'+
+            '<span style="font-size:13px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
+          '</div>'+
+        '</div>'+
       '</div>'
     : '';
 
@@ -3235,6 +3306,11 @@ function _renderClubDashboardMember(d, t, el, opts){
           '</div>'+
         '</div>'+
       '</div>'+
+      // Inline info banner for the selected month. Sits between the
+      // ring + info column and the legend so the connection to the
+      // ring is visible. When nothing is selected this row is hidden
+      // (CSS) to avoid taking permanent space.
+      _renderMemberRingInfoRow(months, memberSelected) +
       // Legend below the hero — tiny and unobtrusive.
       '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
             'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
@@ -3278,14 +3354,21 @@ function _renderClubDashboardMember(d, t, el, opts){
       '</div>';
   } else if(unpaidPeriods.length === 0 && entryFeeOwed > 0){
     // Special case: dues are caught up but entry fee is still unpaid.
+    // Clickable when canManagePaid (admin viewing / own profile) so
+    // the operator can mark it paid through the existing Edit Person
+    // flow. We hint the action with cursor + chevron.
+    var efClickable = canManagePaid;
     statusCard =
-      '<div style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.34);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
+      '<div'+(efClickable ? ' id="member-status-card"' : '')+
+       ' style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.34);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;'+
+       (efClickable ? 'cursor:pointer;' : '')+'">'+
         '<div style="display:flex;align-items:center;gap:10px;">'+
           '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#ff9f0a;color:#fff;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;">○</span>'+
-          '<div>'+
+          '<div style="flex:1;min-width:0;">'+
             '<div style="font-size:15px;font-weight:700;color:#ff9f0a;">Entry fee unpaid</div>'+
             '<div style="font-size:13px;color:var(--c-text);margin-top:2px;">Dues are current, but the entry fee of <strong>'+money(entryFeeOwed)+'</strong> is still owed.</div>'+
           '</div>'+
+          (efClickable ? '<span style="font-size:18px;color:var(--c-text-3);flex-shrink:0;">›</span>' : '') +
         '</div>'+
       '</div>';
   } else {
@@ -3299,16 +3382,22 @@ function _renderClubDashboardMember(d, t, el, opts){
           ? 'Unpaid — 1 month behind'
           : 'Unpaid — '+overdue.length+' months behind')
       : 'Due this month';
+    // Clickable when canManagePaid — admin can drill into the
+    // per-month "Mark paid →" modal directly.
+    var upClickable = canManagePaid;
     statusCard =
-      '<div style="background:'+bg+';border:1px solid '+border+';border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
+      '<div'+(upClickable ? ' id="member-status-card"' : '')+
+       ' style="background:'+bg+';border:1px solid '+border+';border-radius:var(--r);padding:16px 18px;margin-bottom:14px;'+
+       (upClickable ? 'cursor:pointer;' : '')+'">'+
         '<div style="display:flex;align-items:center;gap:10px;">'+
           '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:'+color+';color:#fff;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;">○</span>'+
-          '<div>'+
+          '<div style="flex:1;min-width:0;">'+
             '<div style="font-size:15px;font-weight:700;color:'+color+';">'+esc(headline)+'</div>'+
             '<div style="font-size:13px;color:var(--c-text);margin-top:2px;"><strong>'+money(d.my_unpaid_total||0)+'</strong> across '+unpaidPeriods.length+' month'+(unpaidPeriods.length===1?'':'s')+'</div>'+
             '<div style="font-size:11px;color:var(--c-text-3);margin-top:3px;">'+esc(monthNames)+'</div>'+
             entryFeeLine +
           '</div>'+
+          (upClickable ? '<span style="font-size:18px;color:var(--c-text-3);flex-shrink:0;">›</span>' : '') +
         '</div>'+
       '</div>';
   }
@@ -3317,47 +3406,20 @@ function _renderClubDashboardMember(d, t, el, opts){
   // When an admin is looking at another member's profile OR at their
   // own My Profile view, the unpaid months become directly actionable.
   // Each row opens the mark-dues-paid modal pre-filled with that
-  // period. On a regular member's own dashboard this section stays
-  // hidden — members can't mark their own dues paid; they go through
-  // the "I paid dues" claim flow which routes through the admin.
+  // canManagePaid is now used to decide whether the status card opens
+  // the Manage Unpaid modal. The inline card on the dashboard is no
+  // longer rendered — instead a yellow/red highlighted status card
+  // serves as the entry point, and tapping it opens the modal which
+  // holds the row-by-row "Mark paid →" buttons.
   var canManagePaid = (opts.isViewing || opts.showManageUnpaid);
-  var manageUnpaidCard = '';
-  if(canManagePaid && unpaidPeriods.length > 0){
-    var manageRows = '';
-    unpaidPeriods.forEach(function(p){
-      var statusLbl, statusColor;
-      var paid = Number(p.paid_amount) || 0;
-      var balance = Number(p.balance) || (Number(p.amount) - paid);
-      if(paid > 0){
-        statusLbl = money(balance) + ' left of ' + money(p.amount);
-        statusColor = '#ff9f0a';
-      } else {
-        statusLbl = money(p.amount) + ' owed';
-        statusColor = '#ff453a';
-      }
-      manageRows +=
-        '<button type="button" data-mark-dues-id="'+esc(p.dues_id)+'" '+
-          'style="display:flex;align-items:center;gap:10px;width:100%;'+
-          'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
-          'border-radius:10px;margin-bottom:6px;cursor:pointer;text-align:left;'+
-          'font-family:inherit;color:var(--c-text);">'+
-          '<div style="flex:1;min-width:0;">'+
-            '<div style="font-size:14px;font-weight:600;">'+esc(p.label)+'</div>'+
-            '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
-              esc(statusLbl)+'</div>'+
-          '</div>'+
-          '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">Mark paid →</span>'+
-        '</button>';
-    });
-    manageUnpaidCard =
-      '<div style="background:var(--c-bg);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;border:1px solid var(--c-border);">'+
-        '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
-          'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">'+
-          'Manage unpaid'+
-        '</div>'+
-        manageRows +
-      '</div>';
-  }
+  var manageUnpaidCard = '';   // intentionally empty; modal owns this UI now
+  // Cache enough context that the status-card click handler can open
+  // the modal without re-deriving anything. Member-side rendering is
+  // disabled (canManagePaid=false), so the modal is gated to admin
+  // viewing and the admin's own-profile view.
+  state.unpaidModalCtx = canManagePaid
+    ? { periods: unpaidPeriods, viewingName: opts.viewingName || meName }
+    : null;
 
   // ---- Recent activity — STRICTLY PERSONAL ---------------------------
   // Pull only events the caller participated in: their own paid dues,
@@ -3423,61 +3485,63 @@ function _renderClubDashboardMember(d, t, el, opts){
   // is a no-op since they can't edit other people's data anyway.
   _wireEditDuesClicks(el);
 
-  // Member ring segments are click-to-inspect (Note 9). Tapping a
-  // segment shows a quick status toast — "May 2026: paid $25" /
-  // "March 2026: $25 owed". We deliberately don't open a modal here
-  // because the spec keeps the member ring read-only; the toast gives
-  // the user the same one-line summary at a glance.
+  // Member ring segments are click-to-select (Note 3 / V2-CLUB.29).
+  // Tapping a segment highlights it and reveals the inline info row
+  // above the legend. Tapping the centre clears the selection.
   el.querySelectorAll('[data-mr-period]').forEach(function(p){
     p.onclick = function(){
-      var label = p.dataset.mrLabel || p.dataset.mrPeriod;
-      var status = p.dataset.mrStatus;
-      var amt = parseFloat(p.dataset.mrAmount) || 0;
-      var paid = parseFloat(p.dataset.mrPaid) || 0;
-      var msg;
-      // Capitalize the FMMonth so "January" stays "January" rather than
-      // becoming "january".
-      var pretty = label.charAt(0).toUpperCase() + label.slice(1);
-      if(status === 'paid'){
-        msg = pretty + ': paid ' + money(paid || amt);
-      } else if(status === 'partial'){
-        msg = pretty + ': ' + money(paid) + ' paid of ' + money(amt) +
-              ' — ' + money(amt - paid) + ' left';
-      } else if(status === 'current'){
-        msg = pretty + ': current month — ' + money(amt) + ' due';
-      } else if(status === 'unpaid'){
-        msg = pretty + ': ' + money(amt) + ' owed';
-      } else if(status === 'future'){
-        msg = pretty + ': not billed yet';
+      state.memberSelectedMonth = p.dataset.mrPeriod || null;
+      if(state.viewingMember && state.viewingMember.directory_id){
+        openMemberProfileView(state.viewingMember.directory_id);
       } else {
-        msg = pretty + ': not a member';
+        state.clubDashboardLoadedFor = null;
+        renderActiveTab();
       }
-      toast(msg);
+    };
+  });
+  // Centre disc — clears the selection. Only meaningful when something
+  // is selected; an empty-state tap is a no-op (no rerender needed).
+  el.querySelectorAll('[data-mr-reset]').forEach(function(c){
+    c.onclick = function(){
+      if(state.memberSelectedMonth){
+        state.memberSelectedMonth = null;
+        if(state.viewingMember && state.viewingMember.directory_id){
+          openMemberProfileView(state.viewingMember.directory_id);
+        } else {
+          state.clubDashboardLoadedFor = null;
+          renderActiveTab();
+        }
+      }
     };
   });
 
-  // Viewing-mode / own-profile Mark-paid wiring. Each row carries the
-  // dues_id; the click opens the existing mark-dues-paid modal pre-
-  // loaded with the target's name and the period state.
-  if(canManagePaid){
-    el.querySelectorAll('[data-mark-dues-id]').forEach(function(b){
-      b.onclick = function(){
-        var duesId = b.dataset.markDuesId;
-        var p = unpaidPeriods.filter(function(x){
-          return String(x.dues_id) === String(duesId);
-        })[0];
-        if(!p) return;
-        openMarkDuesModal({
-          dues_id:     p.dues_id,
-          actor:       opts.viewingName || meName,
-          period:      p.period,
-          status:      (Number(p.paid_amount) > 0) ? 'partial' : 'unpaid',
-          amount:      p.amount,
-          paid_amount: p.paid_amount
-        });
-      };
-    });
+  // Status card → Manage Unpaid modal. Only wired when the card was
+  // rendered as clickable (admin viewing / own profile + something
+  // owed). Tapping anywhere on the highlighted card opens the modal.
+  var statusEl = el.querySelector('#member-status-card');
+  if(statusEl){
+    statusEl.onclick = openManageUnpaidModal;
   }
+
+  // Contributed / Spent cards → per-member breakdown modal.
+  var contribEl = el.querySelector('#member-contrib-card');
+  if(contribEl){
+    contribEl.onclick = function(){
+      openMemberBreakdown(contribEl.dataset.mbDir, parseInt(contribEl.dataset.mbYear, 10));
+    };
+  }
+  // Async backfill: load this member's spent total and reveal the
+  // Spent row if it's non-zero. Cached in state.memberSpentCache so
+  // a subsequent render in the same session doesn't re-fetch.
+  (function(){
+    var dirHint = contribEl && contribEl.dataset.mbDir;
+    var yrHint  = contribEl && parseInt(contribEl.dataset.mbYear, 10);
+    if(!dirHint || !yrHint || !t || !t.trip_id) return;
+    _loadMemberSpentValue(t.trip_id, dirHint, yrHint);
+  })();
+
+  // (Old inline Mark-paid wiring removed in V2-CLUB.29 — the buttons
+  // now live inside modal-manage-unpaid which owns its own handlers.)
 
   // Wire the Back button (viewing-another-member mode only).
   var back = $('mp-back');
@@ -3518,12 +3582,16 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     var color = _statusColor(m.status);
     var startDeg = -90 + (i * segDeg) + (gapDeg/2);
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
-    // Match the admin ring: the "highlighted" segment (current month
-    // by default) gets +6 to its stroke so it reads as the focal point
-    // even before the halo animation kicks in.
     var isPulse = !!(opts.pulsePeriod && m.period === opts.pulsePeriod);
+    // Selected segment: matches the admin club ring pattern — give it
+    // a thicker stroke so the highlight reads at a glance. Selected
+    // wins over pulse when both are true (current month + selected).
+    var isSelected = !!(opts.selectedPeriod && m.period === opts.selectedPeriod);
+    var strokeW = thickness;
+    if(isPulse)    strokeW = thickness + 6;
+    if(isSelected) strokeW = thickness + 8;
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
-      isPulse ? thickness + 6 : thickness, m.label || '',
+      strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
     if(isPulse){
       // Reuse the admin halo helper — same "heartbeat" cue everywhere.
@@ -3550,8 +3618,14 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
           (isFaded?'opacity="0.55"':'')+' style="pointer-events:none;">'+MONTH_3[i]+'</text>';
     }
   }
+  // Invisible center hit target. Tapping inside the ring (where no
+  // segment is) clears the selection — same affordance as the admin
+  // ring. We size it as a generous circle so a thumb-tap registers.
+  var centerHit = '<circle cx="'+cx+'" cy="'+cy+'" r="'+(r - thickness - 8)+'" '+
+    'fill="transparent" data-mr-reset="1" '+
+    'style="cursor:pointer;"></circle>';
   return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" '+
-    'style="display:block;overflow:visible;">'+ paths + halos + labels +'</svg>';
+    'style="display:block;overflow:visible;">'+ centerHit + paths + halos + labels +'</svg>';
 }
 function _statusColor(status){
   return ({
@@ -3599,11 +3673,261 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
          (label ? '<title>'+esc(label)+'</title>' : '') +
          '</path>';
 }
+// Inline info row shown beneath the member ring when a month segment
+// is selected. The phrasing matches what the old toast used so the
+// transition (V2-CLUB.29) keeps the existing copy. Returns an empty
+// string when nothing is selected so the layout doesn't reserve space.
+function _renderMemberRingInfoRow(months, selectedPeriod){
+  if(!selectedPeriod) return '';
+  var m = (months || []).filter(function(x){ return x.period === selectedPeriod; })[0];
+  if(!m) return '';
+  var label = (m.label || '').charAt(0).toUpperCase() + (m.label || '').slice(1);
+  var amt   = Number(m.amount || 0);
+  var paid  = Number(m.paid_amount || 0);
+  var color, headline;
+  if(m.status === 'paid'){
+    color = '#30d158';
+    headline = label + ': paid ' + money(paid || amt);
+  } else if(m.status === 'partial'){
+    color = '#ff9f0a';
+    headline = label + ': ' + money(paid) + ' of ' + money(amt) +
+               ' — ' + money(amt - paid) + ' left';
+  } else if(m.status === 'current'){
+    color = '#0a84ff';
+    headline = label + ': current month — ' + money(amt) + ' due';
+  } else if(m.status === 'unpaid'){
+    color = '#ff453a';
+    headline = label + ': ' + money(amt) + ' owed';
+  } else if(m.status === 'future'){
+    color = 'var(--c-text-3)';
+    headline = label + ': not billed yet';
+  } else {
+    color = 'var(--c-text-3)';
+    headline = label + ': not a member';
+  }
+  return '<div style="margin-top:14px;padding:10px 12px;background:var(--c-bg);'+
+      'border-radius:10px;display:flex;align-items:center;justify-content:space-between;'+
+      'gap:10px;">'+
+    '<div style="font-size:12.5px;color:var(--c-text);">'+esc(headline)+'</div>'+
+    '<span style="width:8px;height:8px;border-radius:50%;background:'+color+';flex-shrink:0;"></span>'+
+  '</div>';
+}
+
 function _ringLegendItem(color, label, muted){
   var op = muted ? 0.28 : 1;
   return '<span style="display:inline-flex;align-items:center;gap:5px;">'+
     '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';opacity:'+op+';"></span>'+
     esc(label) + '</span>';
+}
+
+// =====================================================================
+//  MEMBER POOL BREAKDOWN MODAL
+// =====================================================================
+// Opened by tapping the Contributed / Spent cards on the member view.
+// Pulls per-member data via get_member_pool_breakdown — backend
+// applies its own auth so this works for members viewing themselves
+// as well as admins viewing others.
+
+state.memberBreakdown = null;
+state.memberBreakdownTarget = null;
+state.memberSpentCache = state.memberSpentCache || {};
+
+async function openMemberBreakdown(dirId, year){
+  var t = state.trip; if(!t || !dirId) return;
+  state.memberBreakdownTarget = { dir: dirId, year: year || (new Date()).getFullYear() };
+  $('mb-body').innerHTML =
+    '<div class="center-spin"><div class="spinner"></div></div>';
+  openModal('modal-member-breakdown');
+  await _loadMemberBreakdown(state.memberBreakdownTarget.year);
+}
+
+async function _loadMemberBreakdown(year){
+  var t = state.trip; var tgt = state.memberBreakdownTarget;
+  if(!t || !tgt) return;
+  try{
+    var args = { p_trip: t.trip_id, p_dir: tgt.dir };
+    if(year != null) args.p_year = year;
+    var res = await sb.rpc('get_member_pool_breakdown', args);
+    if(res.error) throw res.error;
+    state.memberBreakdown = res.data;
+    _renderMemberBreakdown();
+  }catch(err){
+    $('mb-body').innerHTML =
+      '<div class="empty" style="padding:24px 6px;">'+
+        '<div class="empty-title">Could not load</div>'+
+        '<div class="empty-sub">'+esc(err.message || 'Unknown error')+'</div>'+
+      '</div>';
+  }
+}
+
+function _renderMemberBreakdown(){
+  var d = state.memberBreakdown; if(!d) return;
+  var yrSel = $('mb-year');
+  var optsHtml = '';
+  (d.available_years || []).forEach(function(y){
+    optsHtml += '<option value="'+esc(String(y))+'"'+
+      (y === d.year ? ' selected' : '')+'>'+esc(String(y))+'</option>';
+  });
+  yrSel.innerHTML = optsHtml;
+
+  var c = d.contributed || {};
+  var s = d.spent || {};
+
+  function _r(label, val, sub){
+    return '<div style="display:flex;justify-content:space-between;'+
+        'align-items:baseline;padding:6px 0;border-top:1px solid var(--c-border);">'+
+      '<span style="font-size:12.5px;color:var(--c-text-2);">'+esc(label)+'</span>'+
+      '<span style="font-size:13px;font-weight:700;color:var(--c-text);">'+val+
+        (sub ? '<span style="font-size:10.5px;color:var(--c-text-3);font-weight:400;'+
+                  'margin-left:6px;">'+esc(sub)+'</span>' : '')+
+      '</span>'+
+    '</div>';
+  }
+  function _section(title, total, totalColor){
+    return '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.5px;margin-top:18px;'+
+        'display:flex;justify-content:space-between;align-items:baseline;">'+
+      '<span>'+esc(title)+'</span>'+
+      '<span style="font-size:15px;font-weight:800;color:'+(totalColor||'var(--c-text)')+';">'+
+        money(total)+'</span>'+
+    '</div>';
+  }
+
+  var html = '';
+  // CONTRIBUTED block — what this member put into the pool.
+  html += _section('Contributed', c.total || 0, '#30d158');
+  html += '<div style="margin-top:4px;">'+
+    _r('Dues',       money(c.dues      || 0)) +
+    _r('Entry fees', money(c.entry_fee || 0)) +
+    _r('Donations',  money(c.donation  || 0)) +
+    _r('Rentals',    money(c.rental    || 0)) +
+  '</div>';
+
+  // SPENT block — member's own out-of-pocket. Pool spends belong to
+  // the club, not this member, so they're excluded.
+  html += _section('Out-of-pocket spending', s.year || 0, '#ff453a');
+  html += '<div style="margin-top:4px;font-size:11px;color:var(--c-text-3);padding:6px 0;">'+
+    'Expenses you covered personally (not from the pool).'+
+  '</div>';
+
+  // All-time totals for context.
+  html += '<div style="margin-top:18px;padding:12px 14px;background:var(--c-bg);'+
+      'border-radius:var(--r);">'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;">'+
+      '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+          'text-transform:uppercase;letter-spacing:0.5px;">Contributed (all time)</span>'+
+      '<span style="font-size:16px;font-weight:800;color:var(--c-text);">'+
+        money(d.contributed_all_time || 0)+'</span>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;">'+
+      '<span style="font-size:12px;font-weight:700;color:var(--c-text-3);'+
+          'text-transform:uppercase;letter-spacing:0.5px;">Spent (all time)</span>'+
+      '<span style="font-size:16px;font-weight:800;color:var(--c-text);">'+
+        money(s.all_time || 0)+'</span>'+
+    '</div>'+
+  '</div>';
+
+  $('mb-body').innerHTML = html;
+}
+
+// Helper for the member view's spent row backfill (see hero card).
+// Returns nothing; reads the value, caches it, and toggles the
+// inline row's visibility based on whether it's > 0.
+async function _loadMemberSpentValue(tripId, dirId, year){
+  var key = tripId+':'+dirId+':'+year;
+  if(state.memberSpentCache[key] != null){
+    _applyMemberSpentToDom(state.memberSpentCache[key]);
+    return;
+  }
+  try{
+    var res = await sb.rpc('get_member_pool_breakdown',
+      { p_trip: tripId, p_dir: dirId, p_year: year });
+    if(res.error || !res.data) return;
+    var val = (res.data.spent && res.data.spent.year) || 0;
+    state.memberSpentCache[key] = val;
+    _applyMemberSpentToDom(val);
+  }catch(err){ /* silently degrade — the row stays hidden */ }
+}
+
+function _applyMemberSpentToDom(val){
+  var valueEl = document.getElementById('member-spent-value');
+  var rowEl   = document.getElementById('member-spent-row');
+  if(!valueEl || !rowEl) return;
+  if(Number(val) > 0){
+    valueEl.textContent = money(val);
+    rowEl.hidden = false;
+    rowEl.onclick = function(){
+      openMemberBreakdown(rowEl.dataset.mbDir, parseInt(rowEl.dataset.mbYear, 10));
+    };
+  } else {
+    rowEl.hidden = true;
+  }
+}
+// Opened from the member-view status card. Renders the list of unpaid
+// months as buttons, each routing to the existing Mark Paid modal.
+// state.unpaidModalCtx is populated at render time by the member
+// renderer and carries periods + the target's display name.
+function openManageUnpaidModal(){
+  var ctx = state.unpaidModalCtx;
+  if(!ctx || !ctx.periods || !ctx.periods.length){
+    // Empty state: shouldn't happen in practice since the card is
+    // hidden when the count is zero, but cover it anyway.
+    $('mu-body').innerHTML =
+      '<div class="empty" style="padding:24px 6px;">'+
+        '<div class="empty-title">Nothing to manage</div>'+
+        '<div class="empty-sub">All months are paid.</div>'+
+      '</div>';
+    openModal('modal-manage-unpaid');
+    return;
+  }
+  var rows = '';
+  ctx.periods.forEach(function(p){
+    var statusLbl, statusColor;
+    var paid = Number(p.paid_amount) || 0;
+    var balance = Number(p.balance) || (Number(p.amount) - paid);
+    if(paid > 0){
+      statusLbl = money(balance) + ' left of ' + money(p.amount);
+      statusColor = '#ff9f0a';
+    } else {
+      statusLbl = money(p.amount) + ' owed';
+      statusColor = '#ff453a';
+    }
+    rows +=
+      '<button type="button" data-mu-dues-id="'+esc(p.dues_id)+'" '+
+        'style="display:flex;align-items:center;gap:10px;width:100%;'+
+        'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
+        'border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left;'+
+        'font-family:inherit;color:var(--c-text);">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div style="font-size:14px;font-weight:600;">'+esc(p.label)+'</div>'+
+          '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
+            esc(statusLbl)+'</div>'+
+        '</div>'+
+        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">Mark paid →</span>'+
+      '</button>';
+  });
+  $('mu-body').innerHTML = rows;
+  // Wire each row to the Mark Paid modal. We close the manage modal
+  // before opening Mark Paid so the operator sees the form cleanly.
+  $('mu-body').querySelectorAll('[data-mu-dues-id]').forEach(function(btn){
+    btn.onclick = function(){
+      var duesId = btn.dataset.muDuesId;
+      var p = ctx.periods.filter(function(x){
+        return String(x.dues_id) === String(duesId);
+      })[0];
+      if(!p) return;
+      closeModal('modal-manage-unpaid');
+      setTimeout(function(){
+        openMarkDuesModal({
+          dues_id: p.dues_id, actor: ctx.viewingName || '',
+          period: p.period,
+          status: (Number(p.paid_amount) > 0) ? 'partial' : 'unpaid',
+          amount: p.amount, paid_amount: p.paid_amount
+        });
+      }, 180);
+    };
+  });
+  openModal('modal-manage-unpaid');
 }
 
 // ============================================================
@@ -6205,9 +6529,22 @@ function _openClubExpenseModalFresh(){
   // Default: POOL for admins, self for members.
   if(canChargePool) sel.value = 'pool';
   else              sel.value = t.my_directory_id || '';
-  // Member-side: lock the dropdown so the only option is the caller
-  // themselves. Visually still readable, just not changeable.
-  sel.disabled = !canChargePool;
+  // Member-side: hide the dropdown completely and show the "Paid by
+  // You" locked display instead. Admin/treasurer/global see the
+  // dropdown as before.
+  var paidByLabel = $('cex-paid-by').previousElementSibling;
+  if(canChargePool){
+    show('cex-paid-by');
+    if(paidByLabel && paidByLabel.tagName === 'LABEL') show(paidByLabel.id || paidByLabel);
+    if(paidByLabel && paidByLabel.tagName === 'LABEL') paidByLabel.hidden = false;
+    hide('cex-paid-by-locked');
+    sel.disabled = false;
+  } else {
+    hide('cex-paid-by');
+    if(paidByLabel && paidByLabel.tagName === 'LABEL') paidByLabel.hidden = true;
+    show('cex-paid-by-locked');
+    sel.disabled = true;
+  }
   hide('cex-treasurer-hint');
   openModal('modal-club-expense');
   setTimeout(function(){ $('cex-desc').focus(); }, 150);
@@ -9948,6 +10285,11 @@ $('et-cancel').onclick = function(){
 };
 $('et-save').onclick   = doSaveEditTransaction;
 $('et-delete').onclick = doDeleteEditTransaction;
+// Manage Unpaid modal close button.
+$('mu-close').onclick  = function(){ closeModal('modal-manage-unpaid'); };
+// Member breakdown modal.
+$('mb-close').onclick  = function(){ closeModal('modal-member-breakdown'); };
+$('mb-year').onchange  = function(){ _loadMemberBreakdown(parseInt($('mb-year').value, 10)); };
 // Pool balance breakdown modal close button.
 $('pb-close').onclick  = function(){ closeModal('modal-pool-breakdown'); };
 $('pb-year').onchange  = function(){ _loadPoolBreakdown(parseInt($('pb-year').value, 10)); };
