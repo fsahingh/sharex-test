@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.22">
+<meta name="app-version" content="V2-CLUB.24">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1028,7 +1028,7 @@
       <div style="font-size:12px;color:var(--c-text-3);margin-top:2px;" id="md-due">Due: $0.00</div>
       <label for="md-amount" style="margin-top:18px;">Amount received ($)</label>
       <input type="number" id="md-amount" class="field" min="0" step="0.01">
-      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">
+      <div id="md-amount-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">
         Enter the full amount due to mark as paid, or a smaller value for a partial payment.
       </div>
       <label for="md-notes" style="margin-top:14px;">Notes (optional)</label>
@@ -1775,7 +1775,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.22';
+var APP_VERSION = 'V2-CLUB.24';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4009,6 +4009,39 @@ function _auditLabel(ev){
 // submits via submit_dues_payment_claim. Admin/treasurer see it as a
 // notification and approving runs mark_dues_paid automatically.
 state.duesClaim = null;
+
+// Live hint helper for the I-Paid-Dues modal. Module-level (not nested
+// inside openMyDuesClaim) so it's reachable across re-opens and so any
+// strict-mode scoping quirks for block-level function declarations
+// inside async functions can't bite us. It always re-queries the DOM
+// nodes since the hosting innerHTML is rebuilt on every open.
+function _updateDuesClaimHint(){
+  var hint   = $('dc-amount-hint'); if(!hint) return;
+  var amtEl  = $('dc-amount');
+  var sel    = $('dc-month');
+  var o      = sel ? sel.selectedOptions[0] : null;
+  var balance = (o && o.dataset && o.dataset.amt) ? Number(o.dataset.amt) : 0;
+  var typed   = amtEl ? parseFloat(amtEl.value) : NaN;
+  if(!o || !o.value || isNaN(typed) || typed <= 0){
+    hint.textContent = 'Defaults to the full balance for the picked month. '+
+      'Paying less marks the month partial; over-paying is capped.';
+    hint.style.color = 'var(--c-text-3)';
+    return;
+  }
+  if(typed < balance - 0.005){
+    hint.innerHTML = '<strong>Partial payment:</strong> '+money(typed)+' of '+money(balance)+
+      ' — '+money(balance - typed)+' will remain owed for this month.';
+    hint.style.color = '#ff9f0a';
+  } else if(typed > balance + 0.005){
+    hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. '+
+      'The form will submit '+money(balance)+' (the full balance). Adjust if you meant otherwise.';
+    hint.style.color = '#ff453a';
+  } else {
+    hint.innerHTML = 'Full payment for the month: '+money(balance)+'.';
+    hint.style.color = '#30d158';
+  }
+}
+
 async function openMyDuesClaim(){
   openModal('modal-dues-claim');
   $('dc-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
@@ -4062,33 +4095,6 @@ async function openMyDuesClaim(){
       '<label for="dc-note" style="margin-top:14px;">Note (optional)</label>'+
       '<input type="text" id="dc-note" class="field" maxlength="200" placeholder="e.g. Venmo on May 18">';
 
-    // Helper updates the contextual hint as the user types / picks a
-    // different month. It compares the typed amount against the month's
-    // outstanding balance and adds a clear cue for over/under.
-    function _updateDuesClaimHint(){
-      var hint = $('dc-amount-hint'); if(!hint) return;
-      var o = $('dc-month').selectedOptions[0];
-      var balance = o ? Number(o.dataset.amt || 0) : 0;
-      var typed = parseFloat($('dc-amount').value);
-      var base = 'Defaults to the full balance for the picked month.';
-      if(!o || isNaN(typed) || typed <= 0){
-        hint.textContent = base + ' Paying less marks the month partial; over-paying is not allowed.';
-        hint.style.color = 'var(--c-text-3)';
-        return;
-      }
-      if(typed < balance - 0.005){
-        hint.innerHTML = '<strong>Partial payment:</strong> '+money(typed)+' of '+money(balance)+
-          ' — '+money(balance - typed)+' will remain owed for this month.';
-        hint.style.color = '#ff9f0a';
-      } else if(typed > balance + 0.005){
-        hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. The form will submit '+
-          money(balance)+' (the full balance). Adjust if you meant otherwise.';
-        hint.style.color = '#ff453a';
-      } else {
-        hint.innerHTML = 'Full payment for the month: '+money(balance)+'.';
-        hint.style.color = '#30d158';
-      }
-    }
     // When the month changes, default the amount to that row's balance.
     $('dc-month').addEventListener('change', function(){
       var o = $('dc-month').selectedOptions[0];
@@ -4100,7 +4106,14 @@ async function openMyDuesClaim(){
       $('dc-submit').disabled = !o || !o.value;
       _updateDuesClaimHint();
     });
-    $('dc-amount').addEventListener('input', _updateDuesClaimHint);
+    // Bind both 'input' and 'change' so the hint reacts to every keystroke
+    // *and* paste/spinner events. Some mobile browsers fire one but not
+    // the other reliably; this covers both paths.
+    $('dc-amount').addEventListener('input',  _updateDuesClaimHint);
+    $('dc-amount').addEventListener('change', _updateDuesClaimHint);
+    // Run once on open so the placeholder hint is replaced as soon as
+    // the user has a month selected (auto-defaulted amount included).
+    _updateDuesClaimHint();
   }catch(err){
     $('dc-body').innerHTML =
       '<div class="empty"><div class="empty-title">Could not load</div>'+
@@ -4962,10 +4975,48 @@ async function openMarkDuesModal(ev){
   $('md-msg').className = 'msg';
   state.markDuesId = ev.dues_id;
   state.markDuesCurrentStatus = ev.status;
+  // Cache the row's full amount on the input so the hint helper (which
+  // only sees DOM) knows the cap without us threading state around.
+  $('md-amount').dataset.full = String(ev.amount || 0);
   // "Mark unpaid" button only visible if the row is already paid/partial.
   $('md-unpaid').hidden = !(ev.status === 'paid' || ev.status === 'partial');
+  // Bind hint listeners once per open; innerHTML isn't rebuilt for this
+  // modal, so we go through the same input element each time and need
+  // to avoid stacking handlers — replace any previous binding.
+  var inp = $('md-amount');
+  inp.oninput  = _updateMarkDuesHint;
+  inp.onchange = _updateMarkDuesHint;
+  _updateMarkDuesHint();
   openModal('modal-mark-dues');
   setTimeout(function(){ $('md-amount').focus(); $('md-amount').select(); }, 150);
+}
+
+// Hint helper for the admin-side "Record dues payment" modal. Mirrors
+// _updateDuesClaimHint but reads the cap from the input's data-full
+// attribute (set when the modal opens) rather than the dropdown option.
+function _updateMarkDuesHint(){
+  var hint  = $('md-amount-hint'); if(!hint) return;
+  var amtEl = $('md-amount');
+  var full  = amtEl && amtEl.dataset && amtEl.dataset.full
+              ? Number(amtEl.dataset.full) : 0;
+  var typed = amtEl ? parseFloat(amtEl.value) : NaN;
+  if(!full || isNaN(typed) || typed <= 0){
+    hint.textContent = 'Enter the full amount due to mark as paid, or a smaller value for a partial payment.';
+    hint.style.color = 'var(--c-text-3)';
+    return;
+  }
+  if(typed < full - 0.005){
+    hint.innerHTML = '<strong>Partial payment:</strong> '+money(typed)+' of '+money(full)+
+      ' — '+money(full - typed)+' will remain owed.';
+    hint.style.color = '#ff9f0a';
+  } else if(typed > full + 0.005){
+    hint.innerHTML = '<strong>Capped:</strong> over-payment is not supported. '+
+      'The pool will receive '+money(full)+' (the full amount). Adjust if you meant otherwise.';
+    hint.style.color = '#ff453a';
+  } else {
+    hint.innerHTML = 'Full payment: '+money(full)+'.';
+    hint.style.color = '#30d158';
+  }
 }
 
 async function submitMarkDuesPaid(){
@@ -4973,6 +5024,14 @@ async function submitMarkDuesPaid(){
   var notes = $('md-notes').value.trim() || null;
   function setMsg(t){ $('md-msg').className='msg show err'; $('md-msg').textContent=t; }
   if(!(amt > 0)){ setMsg('Enter an amount greater than zero.'); return; }
+  // Cap to the row's full amount so a typo can't overflow into the
+  // pool. Backend mark_dues_paid does this too, but enforcing it on
+  // the client keeps the recorded value aligned with what the admin
+  // sees in the modal.
+  var fullCap = parseFloat($('md-amount').dataset.full || '0');
+  if(fullCap > 0 && amt > fullCap + 0.005){
+    amt = fullCap;
+  }
   var btn = $('md-save');
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
