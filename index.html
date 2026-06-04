@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.34">
+<meta name="app-version" content="V2-CLUB.35">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.34';
+var APP_VERSION = 'V2-CLUB.35';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3418,12 +3418,18 @@ function _renderClubDashboardMember(d, t, el, opts){
   var canManagePaid = (opts.isViewing || opts.showManageUnpaid || roleHasMgmt);
   var manageUnpaidCard = '';   // intentionally empty; modal owns this UI now
   // Cache enough context that the status-card click handler can open
-  // the modal without re-deriving anything. Member-side rendering is
-  // disabled (canManagePaid=false), so the modal is gated to admin
-  // viewing and the admin's own-profile view.
-  state.unpaidModalCtx = canManagePaid
-    ? { periods: unpaidPeriods, viewingName: opts.viewingName || meName }
-    : null;
+  // the Manage Unpaid modal without re-deriving anything. Populated
+  // for any caller — admin (mark paid), member (request approval) —
+  // because the modal itself decides which action to surface per row.
+  state.unpaidModalCtx = {
+    periods:        unpaidPeriods,
+    viewingName:    opts.viewingName || meName,
+    targetDir:      (state.viewingMember && state.viewingMember.directory_id)
+                    || (t && t.my_directory_id),
+    entryFeeOwed:   entryFeeOwed,
+    canMgmt:        roleHasMgmt,
+    isViewingOther: !!(state.viewingMember && state.viewingMember.directory_id)
+  };
 
   // ---- Recent activity — STRICTLY PERSONAL ---------------------------
   // Pull only events the caller participated in: their own paid dues,
@@ -3519,39 +3525,13 @@ function _renderClubDashboardMember(d, t, el, opts){
     };
   });
 
-  // Status card → role-based opener.
-  //   - Admin / treasurer / global → Manage Unpaid modal (Mark paid →)
-  //                                  or Edit Person for entry fee only
-  //   - Member                     → I-Pay-Dues claim flow for unpaid
-  //                                  months; for entry-fee-only we
-  //                                  point them at the admin.
-  // unpaidModalCtx is populated above with the same periods list that
-  // the modal renders.
+  // Status card → Manage Unpaid modal in every case. The modal handles
+  // both dues unpaid and entry-fee unpaid (member: request approval;
+  // admin: mark paid / Edit Person). Routing is decided inside the
+  // modal handler so the entry point stays single.
   var statusEl = el.querySelector('#member-status-card');
   if(statusEl){
-    statusEl.onclick = function(){
-      var ctx = state.unpaidModalCtx;
-      var hasUnpaidDues = !!(ctx && ctx.periods && ctx.periods.length > 0);
-      if(roleHasMgmt){
-        if(hasUnpaidDues){
-          openManageUnpaidModal();
-        } else {
-          // Entry fee only — Edit Person modal with the entry-fee toggle.
-          var targetDir = (state.viewingMember && state.viewingMember.directory_id)
-                          || (t && t.my_directory_id);
-          if(targetDir) openEditPerson(targetDir);
-        }
-      } else {
-        // Plain member — kick off the claim flow.
-        if(hasUnpaidDues){
-          openMyDuesClaim();
-        } else {
-          // Entry fee unpaid but no dues outstanding — the claim flow
-          // doesn't cover entry fee; surface a quick note instead.
-          toast('Contact an admin to record your entry fee.');
-        }
-      }
-    };
+    statusEl.onclick = openManageUnpaidModal;
   }
 
   // Contributed / Spent cards → per-member breakdown modal.
@@ -3894,25 +3874,39 @@ function _applyMemberSpentToDom(val){
     rowEl.hidden = true;
   }
 }
-// Opened from the member-view status card. Renders the list of unpaid
-// months as buttons, each routing to the existing Mark Paid modal.
-// state.unpaidModalCtx is populated at render time by the member
-// renderer and carries periods + the target's display name.
+
+// Opened from the member-view status card. Lists every outstanding
+// item — unpaid months PLUS the entry fee (if owed) — as rows.
+// Each row's action button adapts to the caller's role:
+//   - admin/treasurer/global → "Mark paid →"     (records immediately)
+//   - plain member           → "Request approval →" (sends a claim)
+// state.unpaidModalCtx is populated at render time and carries the
+// data the modal needs.
 function openManageUnpaidModal(){
   var ctx = state.unpaidModalCtx;
-  if(!ctx || !ctx.periods || !ctx.periods.length){
-    // Empty state: shouldn't happen in practice since the card is
-    // hidden when the count is zero, but cover it anyway.
+  var t = state.trip;
+  if(!ctx || !t){ closeModal('modal-manage-unpaid'); return; }
+  var periods   = ctx.periods || [];
+  var entryFee  = Number(ctx.entryFeeOwed) || 0;
+  var canMgmt   = !!ctx.canMgmt;
+  // Member-side claim flow only makes sense for the member themselves;
+  // when an admin is viewing another member's profile we don't surface
+  // the claim button — admins use the Edit Person flow there.
+  var isOwnPerson = !ctx.isViewingOther;
+
+  if(periods.length === 0 && entryFee <= 0){
     $('mu-body').innerHTML =
       '<div class="empty" style="padding:24px 6px;">'+
         '<div class="empty-title">Nothing to manage</div>'+
-        '<div class="empty-sub">All months are paid.</div>'+
+        '<div class="empty-sub">All months are paid and entry fee is settled.</div>'+
       '</div>';
     openModal('modal-manage-unpaid');
     return;
   }
+
   var rows = '';
-  ctx.periods.forEach(function(p){
+  // ---- Dues rows ----------------------------------------------------
+  periods.forEach(function(p){
     var statusLbl, statusColor;
     var paid = Number(p.paid_amount) || 0;
     var balance = Number(p.balance) || (Number(p.amount) - paid);
@@ -3923,6 +3917,7 @@ function openManageUnpaidModal(){
       statusLbl = money(p.amount) + ' owed';
       statusColor = '#ff453a';
     }
+    var actionLabel = canMgmt ? 'Mark paid →' : 'Request approval →';
     rows +=
       '<button type="button" data-mu-dues-id="'+esc(p.dues_id)+'" '+
         'style="display:flex;align-items:center;gap:10px;width:100%;'+
@@ -3934,30 +3929,100 @@ function openManageUnpaidModal(){
           '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
             esc(statusLbl)+'</div>'+
         '</div>'+
-        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">Mark paid →</span>'+
+        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
+          esc(actionLabel)+'</span>'+
       '</button>';
   });
+
+  // ---- Entry fee row (if owed) -------------------------------------
+  if(entryFee > 0){
+    // Admin self-view: Mark paid → opens Edit Person (entry fee toggle).
+    // Admin viewing another member: action hidden (use See Members).
+    // Member: Request approval → fires submit_entry_fee_payment_claim.
+    var efAction = canMgmt
+      ? (isOwnPerson ? 'Mark paid →' : '')
+      : 'Request approval →';
+    var efTag = canMgmt ? 'mark-entry-fee' : 'claim-entry-fee';
+    rows +=
+      '<button type="button" data-mu-entry-fee="1" data-mu-entry-tag="'+esc(efTag)+'"'+
+        ' style="display:flex;align-items:center;gap:10px;width:100%;'+
+        'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
+        'border-radius:10px;margin-bottom:8px;text-align:left;'+
+        'font-family:inherit;color:var(--c-text);'+
+        (efAction ? 'cursor:pointer;' : 'opacity:0.65;cursor:default;')+'">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div style="font-size:14px;font-weight:600;">Entry fee</div>'+
+          '<div style="font-size:11px;color:#ff9f0a;margin-top:2px;font-weight:600;">'+
+            money(entryFee)+' owed</div>'+
+        '</div>'+
+        (efAction
+          ? '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
+              esc(efAction)+'</span>'
+          : '')+
+      '</button>';
+  }
+
   $('mu-body').innerHTML = rows;
-  // Wire each row to the Mark Paid modal. We close the manage modal
-  // before opening Mark Paid so the operator sees the form cleanly.
+
+  // ---- Wire dues rows ----------------------------------------------
   $('mu-body').querySelectorAll('[data-mu-dues-id]').forEach(function(btn){
     btn.onclick = function(){
       var duesId = btn.dataset.muDuesId;
-      var p = ctx.periods.filter(function(x){
+      var p = periods.filter(function(x){
         return String(x.dues_id) === String(duesId);
       })[0];
       if(!p) return;
       closeModal('modal-manage-unpaid');
       setTimeout(function(){
-        openMarkDuesModal({
-          dues_id: p.dues_id, actor: ctx.viewingName || '',
-          period: p.period,
-          status: (Number(p.paid_amount) > 0) ? 'partial' : 'unpaid',
-          amount: p.amount, paid_amount: p.paid_amount
-        });
+        if(canMgmt){
+          openMarkDuesModal({
+            dues_id: p.dues_id, actor: ctx.viewingName || '',
+            period:  p.period,
+            status:  (Number(p.paid_amount) > 0) ? 'partial' : 'unpaid',
+            amount:  p.amount, paid_amount: p.paid_amount
+          });
+        } else {
+          // Plain member — open the claim flow.
+          openMyDuesClaim();
+        }
       }, 180);
     };
   });
+
+  // ---- Wire entry-fee row -------------------------------------------
+  $('mu-body').querySelectorAll('[data-mu-entry-fee]').forEach(function(btn){
+    btn.onclick = function(){
+      var tag = btn.dataset.muEntryTag;
+      if(tag === 'mark-entry-fee'){
+        // Admin viewing self — Edit Person opens the entry fee toggle.
+        closeModal('modal-manage-unpaid');
+        setTimeout(function(){
+          if(ctx.targetDir) openEditPerson(ctx.targetDir);
+        }, 180);
+      } else if(tag === 'claim-entry-fee'){
+        if(btn.disabled) return;
+        btn.disabled = true;
+        var spanEl = btn.querySelector('span');
+        var origLabel = spanEl ? spanEl.textContent : '';
+        if(spanEl) spanEl.textContent = 'Submitting…';
+        sb.rpc('submit_entry_fee_payment_claim', {
+          p_trip:   t.trip_id,
+          p_amount: null,
+          p_note:   null
+        }).then(function(res){
+          btn.disabled = false;
+          if(spanEl) spanEl.textContent = origLabel;
+          if(res.error){
+            toast(res.error.message || 'Could not submit claim', true);
+            return;
+          }
+          toast('Claim submitted — waiting for admin approval');
+          closeModal('modal-manage-unpaid');
+        });
+      }
+    };
+  });
+
   openModal('modal-manage-unpaid');
 }
 
