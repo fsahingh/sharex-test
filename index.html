@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.32">
+<meta name="app-version" content="V2-CLUB.33">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.32';
+var APP_VERSION = 'V2-CLUB.33';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3414,21 +3414,17 @@ function _renderClubDashboardMember(d, t, el, opts){
   // holds the row-by-row "Mark paid →" buttons.
   //
   // We accept both the explicit opts flags AND the caller's
-  // admin/treasurer/global role as evidence that this person can
-  // manage payments. This makes the card work even if a future code
-  // path forgets to pass the opts flag through.
+  // admin/treasurer/global role as evidence. "View as member" is a
+  // pure UI simulation; the operator still holds the real role and
+  // the backend would still let them mark dues paid. Forcing the
+  // card to be inert in that mode would block a legitimate workflow,
+  // so we keep it active for anyone with the real role.
   var roleHasMgmt = !!(
     (t && t.is_admin) ||
     state.is_treasurer ||
     (state.profile && state.profile.is_global_admin)
   );
-  // "View as member" simulates the member-side UI; suppress mgmt power
-  // when the admin is previewing the member experience.
-  var simMember = (typeof getClubViewAs === 'function')
-    ? (getClubViewAs() === 'member')
-    : false;
-  var canManagePaid = (opts.isViewing || opts.showManageUnpaid ||
-                       (roleHasMgmt && !simMember));
+  var canManagePaid = (opts.isViewing || opts.showManageUnpaid || roleHasMgmt);
   var manageUnpaidCard = '';   // intentionally empty; modal owns this UI now
   // Cache enough context that the status-card click handler can open
   // the modal without re-deriving anything. Member-side rendering is
