@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.29">
+<meta name="app-version" content="V2-CLUB.30">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.29';
+var APP_VERSION = 'V2-CLUB.30';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3515,12 +3515,27 @@ function _renderClubDashboardMember(d, t, el, opts){
     };
   });
 
-  // Status card → Manage Unpaid modal. Only wired when the card was
-  // rendered as clickable (admin viewing / own profile + something
-  // owed). Tapping anywhere on the highlighted card opens the modal.
+  // Status card → opens the right modal for what's owed.
+  //   - Dues unpaid (any number)  → Manage Unpaid modal with row buttons
+  //   - Only entry fee unpaid      → Edit Person modal (entry-fee section)
+  // We gate on canManagePaid in the renderer, so by the time we reach
+  // this wiring the card is already non-clickable for plain members.
   var statusEl = el.querySelector('#member-status-card');
   if(statusEl){
-    statusEl.onclick = openManageUnpaidModal;
+    statusEl.onclick = function(){
+      var ctx = state.unpaidModalCtx;
+      var hasUnpaidDues = !!(ctx && ctx.periods && ctx.periods.length > 0);
+      if(hasUnpaidDues){
+        openManageUnpaidModal();
+      } else {
+        // Entry fee only — open the target's Edit Person modal so the
+        // operator can use the entry-fee toggle there. Target is the
+        // viewing member when set, otherwise the caller (My Profile).
+        var targetDir = (state.viewingMember && state.viewingMember.directory_id)
+                        || (state.trip && state.trip.my_directory_id);
+        if(targetDir) openEditPerson(targetDir);
+      }
+    };
   }
 
   // Contributed / Spent cards → per-member breakdown modal.
@@ -5576,7 +5591,12 @@ async function openEditTransaction(ev){
 
   // Default field visibility per type.
   var showDesc   = isExpense || isDonRental;
-  var showMember = !isExpense || !ev.is_pool;   // POOL expenses don't have a member
+  // Member dropdown is always populated for any non-POOL row. For
+  // POOL-flagged expenses it stays populated but hidden — that way
+  // the operator can uncheck POOL and the dropdown becomes immediately
+  // usable without a re-render race.
+  var memberAvailable = !isExpense || true;   // populate for every kind
+  var showMember = !isExpense || !ev.is_pool;   // hide initially for POOL
   var showPeriod = isDues;
   var showPool   = isExpense;
 
@@ -5615,27 +5635,26 @@ async function openEditTransaction(ev){
   $('et-amount').value      = Number(ev.amount || 0).toFixed(2);
   $('et-pool-toggle').checked = !!ev.is_pool;
 
-  // Member dropdown (every row except POOL-only expense).
-  if(showMember){
-    var sel = $('et-member');
-    var members = (t.members || []).slice()
-      .filter(function(m){ return !m.is_inactive; })
-      .sort(function(a, b){
-        return (displayName(a)||'').toLowerCase().localeCompare(
-               (displayName(b)||'').toLowerCase());
-      });
-    var html = '';
-    members.forEach(function(m){
-      html += '<option value="'+esc(m.directory_id)+'">'+esc(displayName(m))+'</option>';
+  // Member dropdown — populate even for POOL expenses, so flipping
+  // POOL off later doesn't reveal an empty dropdown.
+  var sel = $('et-member');
+  var members = (t.members || []).slice()
+    .filter(function(m){ return !m.is_inactive; })
+    .sort(function(a, b){
+      return (displayName(a)||'').toLowerCase().localeCompare(
+             (displayName(b)||'').toLowerCase());
     });
-    sel.innerHTML = html;
-    sel.value = ev.actor_dir || (members[0] && members[0].directory_id) || '';
-    // For dues, member change reloads the period dropdown.
-    if(isDues){
-      sel.onchange = function(){ _refreshEditTxPeriods(false); };
-    } else {
-      sel.onchange = null;
-    }
+  var html = '';
+  members.forEach(function(m){
+    html += '<option value="'+esc(m.directory_id)+'">'+esc(displayName(m))+'</option>';
+  });
+  sel.innerHTML = html;
+  sel.value = ev.actor_dir || (members[0] && members[0].directory_id) || '';
+  // For dues, member change reloads the period dropdown.
+  if(isDues){
+    sel.onchange = function(){ _refreshEditTxPeriods(false); };
+  } else {
+    sel.onchange = null;
   }
 
   // Period dropdown (dues only)
@@ -6531,16 +6550,16 @@ function _openClubExpenseModalFresh(){
   else              sel.value = t.my_directory_id || '';
   // Member-side: hide the dropdown completely and show the "Paid by
   // You" locked display instead. Admin/treasurer/global see the
-  // dropdown as before.
+  // dropdown as before. The Paid By <label> sits immediately before
+  // the <select> in the DOM, so previousElementSibling reaches it.
   var paidByLabel = $('cex-paid-by').previousElementSibling;
   if(canChargePool){
-    show('cex-paid-by');
-    if(paidByLabel && paidByLabel.tagName === 'LABEL') show(paidByLabel.id || paidByLabel);
+    $('cex-paid-by').hidden = false;
     if(paidByLabel && paidByLabel.tagName === 'LABEL') paidByLabel.hidden = false;
     hide('cex-paid-by-locked');
     sel.disabled = false;
   } else {
-    hide('cex-paid-by');
+    $('cex-paid-by').hidden = true;
     if(paidByLabel && paidByLabel.tagName === 'LABEL') paidByLabel.hidden = true;
     show('cex-paid-by-locked');
     sel.disabled = true;
