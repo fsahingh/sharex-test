@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.35">
+<meta name="app-version" content="V2-CLUB.36">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.35';
+var APP_VERSION = 'V2-CLUB.36';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3917,7 +3917,11 @@ function openManageUnpaidModal(){
       statusLbl = money(p.amount) + ' owed';
       statusColor = '#ff453a';
     }
-    var actionLabel = canMgmt ? 'Mark paid →' : 'Request approval →';
+    // Button label is uniform across roles ("Mark as PAID"). The
+    // role-based behaviour lives in the click handler below — admin
+    // records immediately, member sends a claim. Keeping one label
+    // matches what the user expects on the surface.
+    var actionLabel = 'Mark as PAID';
     rows +=
       '<button type="button" data-mu-dues-id="'+esc(p.dues_id)+'" '+
         'style="display:flex;align-items:center;gap:10px;width:100%;'+
@@ -3936,29 +3940,23 @@ function openManageUnpaidModal(){
 
   // ---- Entry fee row (if owed) -------------------------------------
   if(entryFee > 0){
-    // Admin self-view: Mark paid → opens Edit Person (entry fee toggle).
-    // Admin viewing another member: action hidden (use See Members).
-    // Member: Request approval → fires submit_entry_fee_payment_claim.
-    var efAction = canMgmt
-      ? (isOwnPerson ? 'Mark paid →' : '')
-      : 'Request approval →';
+    // Uniform "Mark as PAID" label across roles. The click handler
+    // decides: admin → mark_entry_fee_paid directly (whether viewing
+    // self or another member); member → submit_entry_fee_payment_claim.
     var efTag = canMgmt ? 'mark-entry-fee' : 'claim-entry-fee';
     rows +=
       '<button type="button" data-mu-entry-fee="1" data-mu-entry-tag="'+esc(efTag)+'"'+
         ' style="display:flex;align-items:center;gap:10px;width:100%;'+
         'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
-        'border-radius:10px;margin-bottom:8px;text-align:left;'+
-        'font-family:inherit;color:var(--c-text);'+
-        (efAction ? 'cursor:pointer;' : 'opacity:0.65;cursor:default;')+'">'+
+        'border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left;'+
+        'font-family:inherit;color:var(--c-text);">'+
         '<div style="flex:1;min-width:0;">'+
           '<div style="font-size:14px;font-weight:600;">Entry fee</div>'+
           '<div style="font-size:11px;color:#ff9f0a;margin-top:2px;font-weight:600;">'+
             money(entryFee)+' owed</div>'+
         '</div>'+
-        (efAction
-          ? '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
-              esc(efAction)+'</span>'
-          : '')+
+        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
+          'Mark as PAID</span>'+
       '</button>';
   }
 
@@ -3992,19 +3990,38 @@ function openManageUnpaidModal(){
   // ---- Wire entry-fee row -------------------------------------------
   $('mu-body').querySelectorAll('[data-mu-entry-fee]').forEach(function(btn){
     btn.onclick = function(){
+      if(btn.disabled) return;
       var tag = btn.dataset.muEntryTag;
+      var spanEl = btn.querySelector('span');
+      var origLabel = spanEl ? spanEl.textContent : '';
+      // Common UX: lock the button and swap the label while the RPC
+      // is in flight. Both admin and member paths use the same
+      // visual treatment so the modal feels uniform.
+      btn.disabled = true;
+      if(spanEl) spanEl.textContent = 'Working…';
+
       if(tag === 'mark-entry-fee'){
-        // Admin viewing self — Edit Person opens the entry fee toggle.
-        closeModal('modal-manage-unpaid');
-        setTimeout(function(){
-          if(ctx.targetDir) openEditPerson(ctx.targetDir);
-        }, 180);
+        // Admin / treasurer / global — record the entry fee paid in
+        // one tap. The target is whichever member the operator is
+        // viewing (or themselves on My Profile).
+        sb.rpc('mark_entry_fee_paid', {
+          p_trip: t.trip_id,
+          p_dir:  ctx.targetDir
+        }).then(function(res){
+          btn.disabled = false;
+          if(spanEl) spanEl.textContent = origLabel;
+          if(res.error){
+            toast(res.error.message || 'Could not mark paid', true);
+            return;
+          }
+          toast('Entry fee marked paid');
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
+        });
+
       } else if(tag === 'claim-entry-fee'){
-        if(btn.disabled) return;
-        btn.disabled = true;
-        var spanEl = btn.querySelector('span');
-        var origLabel = spanEl ? spanEl.textContent : '';
-        if(spanEl) spanEl.textContent = 'Submitting…';
+        // Plain member — files a claim. Admin/treasurer approves
+        // through the existing notifications/requests UI.
         sb.rpc('submit_entry_fee_payment_claim', {
           p_trip:   t.trip_id,
           p_amount: null,
@@ -4019,11 +4036,28 @@ function openManageUnpaidModal(){
           toast('Claim submitted — waiting for admin approval');
           closeModal('modal-manage-unpaid');
         });
+      } else {
+        // Unknown tag — restore UI.
+        btn.disabled = false;
+        if(spanEl) spanEl.textContent = origLabel;
       }
     };
   });
 
   openModal('modal-manage-unpaid');
+}
+
+// Common refresh after a manage-unpaid action (admin mark paid, etc.).
+// Invalidates the dashboard cache and re-renders the current surface.
+function _refreshAfterUnpaidAction(){
+  state.clubDashboardLoadedFor = null;
+  state.clubLedgerLoadedFor    = null;
+  state.clubMembersLoadedFor   = null;
+  if(state.viewingMember && state.viewingMember.directory_id){
+    openMemberProfileView(state.viewingMember.directory_id);
+  } else {
+    renderActiveTab();
+  }
 }
 
 // ============================================================
