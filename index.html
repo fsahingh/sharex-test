@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.33">
+<meta name="app-version" content="V2-CLUB.34">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.33';
+var APP_VERSION = 'V2-CLUB.34';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3354,11 +3354,9 @@ function _renderClubDashboardMember(d, t, el, opts){
         '</div>'+
       '</div>';
   } else if(unpaidPeriods.length === 0 && entryFeeOwed > 0){
-    // Special case: dues are caught up but entry fee is still unpaid.
-    // Clickable when canManagePaid (admin viewing / own profile) so
-    // the operator can mark it paid through the existing Edit Person
-    // flow. We hint the action with cursor + chevron.
-    var efClickable = canManagePaid;
+    // Entry fee only — clickable for everyone. Role decides what
+    // happens on click (admin: Edit Person; member: claim flow / toast).
+    var efClickable = true;
     statusCard =
       '<div'+(efClickable ? ' id="member-status-card"' : '')+
        ' style="background:rgba(255,159,10,0.12);border:1px solid rgba(255,159,10,0.34);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;'+
@@ -3383,9 +3381,9 @@ function _renderClubDashboardMember(d, t, el, opts){
           ? 'Unpaid — 1 month behind'
           : 'Unpaid — '+overdue.length+' months behind')
       : 'Due this month';
-    // Clickable when canManagePaid — admin can drill into the
-    // per-month "Mark paid →" modal directly.
-    var upClickable = canManagePaid;
+    // Status card is always interactive — admin and member alike.
+    // The role-based click handler decides what to open.
+    var upClickable = true;
     statusCard =
       '<div'+(upClickable ? ' id="member-status-card"' : '')+
        ' style="background:'+bg+';border:1px solid '+border+';border-radius:var(--r);padding:16px 18px;margin-bottom:14px;'+
@@ -3407,18 +3405,11 @@ function _renderClubDashboardMember(d, t, el, opts){
   // When an admin is looking at another member's profile OR at their
   // own My Profile view, the unpaid months become directly actionable.
   // Each row opens the mark-dues-paid modal pre-filled with that
-  // canManagePaid is now used to decide whether the status card opens
-  // the Manage Unpaid modal. The inline card on the dashboard is no
-  // longer rendered — instead a yellow/red highlighted status card
-  // serves as the entry point, and tapping it opens the modal which
-  // holds the row-by-row "Mark paid →" buttons.
-  //
-  // We accept both the explicit opts flags AND the caller's
-  // admin/treasurer/global role as evidence. "View as member" is a
-  // pure UI simulation; the operator still holds the real role and
-  // the backend would still let them mark dues paid. Forcing the
-  // card to be inert in that mode would block a legitimate workflow,
-  // so we keep it active for anyone with the real role.
+  // Status card is always interactive (the yellow / red variants).
+  // canManagePaid is still useful — it tells us which copy and which
+  // action makes sense — but the *clickability* of the card no longer
+  // depends on it. A regular member taps the card to start a payment
+  // claim; an admin taps it to mark dues paid directly.
   var roleHasMgmt = !!(
     (t && t.is_admin) ||
     state.is_treasurer ||
@@ -3528,25 +3519,37 @@ function _renderClubDashboardMember(d, t, el, opts){
     };
   });
 
-  // Status card → opens the right modal for what's owed.
-  //   - Dues unpaid (any number)  → Manage Unpaid modal with row buttons
-  //   - Only entry fee unpaid      → Edit Person modal (entry-fee section)
-  // We gate on canManagePaid in the renderer, so by the time we reach
-  // this wiring the card is already non-clickable for plain members.
+  // Status card → role-based opener.
+  //   - Admin / treasurer / global → Manage Unpaid modal (Mark paid →)
+  //                                  or Edit Person for entry fee only
+  //   - Member                     → I-Pay-Dues claim flow for unpaid
+  //                                  months; for entry-fee-only we
+  //                                  point them at the admin.
+  // unpaidModalCtx is populated above with the same periods list that
+  // the modal renders.
   var statusEl = el.querySelector('#member-status-card');
   if(statusEl){
     statusEl.onclick = function(){
       var ctx = state.unpaidModalCtx;
       var hasUnpaidDues = !!(ctx && ctx.periods && ctx.periods.length > 0);
-      if(hasUnpaidDues){
-        openManageUnpaidModal();
+      if(roleHasMgmt){
+        if(hasUnpaidDues){
+          openManageUnpaidModal();
+        } else {
+          // Entry fee only — Edit Person modal with the entry-fee toggle.
+          var targetDir = (state.viewingMember && state.viewingMember.directory_id)
+                          || (t && t.my_directory_id);
+          if(targetDir) openEditPerson(targetDir);
+        }
       } else {
-        // Entry fee only — open the target's Edit Person modal so the
-        // operator can use the entry-fee toggle there. Target is the
-        // viewing member when set, otherwise the caller (My Profile).
-        var targetDir = (state.viewingMember && state.viewingMember.directory_id)
-                        || (state.trip && state.trip.my_directory_id);
-        if(targetDir) openEditPerson(targetDir);
+        // Plain member — kick off the claim flow.
+        if(hasUnpaidDues){
+          openMyDuesClaim();
+        } else {
+          // Entry fee unpaid but no dues outstanding — the claim flow
+          // doesn't cover entry fee; surface a quick note instead.
+          toast('Contact an admin to record your entry fee.');
+        }
       }
     };
   }
