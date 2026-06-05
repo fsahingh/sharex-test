@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.36">
+<meta name="app-version" content="V2-CLUB.37">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.36';
+var APP_VERSION = 'V2-CLUB.37';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3886,13 +3886,58 @@ function openManageUnpaidModal(){
   var ctx = state.unpaidModalCtx;
   var t = state.trip;
   if(!ctx || !t){ closeModal('modal-manage-unpaid'); return; }
+  // Show the modal first with a spinner; the pending-claims RPC fires
+  // in parallel so the user sees something happening immediately even
+  // on a slow connection.
+  $('mu-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  openModal('modal-manage-unpaid');
+  _loadAndRenderManageUnpaid();
+}
+
+// Fetches the caller's pending member_requests so the manage-unpaid
+// modal can show "Pending approval" on rows that already have a
+// claim awaiting admin review. Member-side only — admins act
+// directly and never have pending claims of their own.
+async function _loadAndRenderManageUnpaid(){
+  var ctx = state.unpaidModalCtx;
+  var t = state.trip;
+  if(!ctx || !t) return;
+  var pendingDuesIds = {};
+  var pendingEntryFee = false;
+  // Only members need the pending lookup. Admins record changes
+  // directly and don't generate their own claim rows.
+  if(!ctx.canMgmt){
+    try{
+      var res = await sb.rpc('list_my_member_requests');
+      if(!res.error && res.data && Array.isArray(res.data.items)){
+        res.data.items.forEach(function(r){
+          if(r.status !== 'pending') return;
+          if(String(r.trip_id) !== String(t.trip_id)) return;
+          if(!r.initiated_by_me) return;
+          if(r.request_type === 'dues_payment_claim' && r.dues_id){
+            pendingDuesIds[String(r.dues_id)] = true;
+          } else if(r.request_type === 'entry_fee_payment_claim'){
+            pendingEntryFee = true;
+          }
+        });
+      }
+    }catch(err){ /* non-fatal — modal still works without the badge */ }
+  }
+  state.unpaidModalPending = {
+    duesIds:   pendingDuesIds,
+    entryFee:  pendingEntryFee
+  };
+  _renderManageUnpaidBody();
+}
+
+function _renderManageUnpaidBody(){
+  var ctx = state.unpaidModalCtx;
+  var t = state.trip;
+  if(!ctx || !t) return;
   var periods   = ctx.periods || [];
   var entryFee  = Number(ctx.entryFeeOwed) || 0;
   var canMgmt   = !!ctx.canMgmt;
-  // Member-side claim flow only makes sense for the member themselves;
-  // when an admin is viewing another member's profile we don't surface
-  // the claim button — admins use the Edit Person flow there.
-  var isOwnPerson = !ctx.isViewingOther;
+  var pending   = state.unpaidModalPending || { duesIds:{}, entryFee:false };
 
   if(periods.length === 0 && entryFee <= 0){
     $('mu-body').innerHTML =
@@ -3900,8 +3945,23 @@ function openManageUnpaidModal(){
         '<div class="empty-title">Nothing to manage</div>'+
         '<div class="empty-sub">All months are paid and entry fee is settled.</div>'+
       '</div>';
-    openModal('modal-manage-unpaid');
     return;
+  }
+
+  // Style helpers — pending rows look disabled and use a different
+  // action label so the member can see their submission was recorded.
+  function _rowStyle(isPending){
+    return 'display:flex;align-items:center;gap:10px;width:100%;'+
+      'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
+      'border-radius:10px;margin-bottom:8px;text-align:left;'+
+      'font-family:inherit;color:var(--c-text);'+
+      (isPending ? 'opacity:0.65;cursor:default;' : 'cursor:pointer;');
+  }
+  function _actionLabel(isPending){
+    if(isPending){
+      return '<span style="font-size:11px;font-weight:700;color:var(--c-text-3);white-space:nowrap;">Pending approval</span>';
+    }
+    return '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">Mark as PAID</span>';
   }
 
   var rows = '';
@@ -3917,53 +3977,51 @@ function openManageUnpaidModal(){
       statusLbl = money(p.amount) + ' owed';
       statusColor = '#ff453a';
     }
-    // Button label is uniform across roles ("Mark as PAID"). The
-    // role-based behaviour lives in the click handler below — admin
-    // records immediately, member sends a claim. Keeping one label
-    // matches what the user expects on the surface.
-    var actionLabel = 'Mark as PAID';
+    var isPending = !!pending.duesIds[String(p.dues_id)];
     rows +=
       '<button type="button" data-mu-dues-id="'+esc(p.dues_id)+'" '+
-        'style="display:flex;align-items:center;gap:10px;width:100%;'+
-        'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
-        'border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left;'+
-        'font-family:inherit;color:var(--c-text);">'+
+        (isPending ? 'disabled ' : '')+
+        'style="'+_rowStyle(isPending)+'">'+
         '<div style="flex:1;min-width:0;">'+
           '<div style="font-size:14px;font-weight:600;">'+esc(p.label)+'</div>'+
           '<div style="font-size:11px;color:'+statusColor+';margin-top:2px;font-weight:600;">'+
             esc(statusLbl)+'</div>'+
         '</div>'+
-        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
-          esc(actionLabel)+'</span>'+
+        _actionLabel(isPending)+
       '</button>';
   });
 
   // ---- Entry fee row (if owed) -------------------------------------
   if(entryFee > 0){
-    // Uniform "Mark as PAID" label across roles. The click handler
-    // decides: admin → mark_entry_fee_paid directly (whether viewing
-    // self or another member); member → submit_entry_fee_payment_claim.
+    var efPending = !!pending.entryFee;
     var efTag = canMgmt ? 'mark-entry-fee' : 'claim-entry-fee';
     rows +=
       '<button type="button" data-mu-entry-fee="1" data-mu-entry-tag="'+esc(efTag)+'"'+
-        ' style="display:flex;align-items:center;gap:10px;width:100%;'+
-        'padding:11px 12px;background:var(--c-card);border:1px solid var(--c-border);'+
-        'border-radius:10px;margin-bottom:8px;cursor:pointer;text-align:left;'+
-        'font-family:inherit;color:var(--c-text);">'+
+        (efPending ? ' disabled' : '')+
+        ' style="'+_rowStyle(efPending)+'">'+
         '<div style="flex:1;min-width:0;">'+
           '<div style="font-size:14px;font-weight:600;">Entry fee</div>'+
           '<div style="font-size:11px;color:#ff9f0a;margin-top:2px;font-weight:600;">'+
             money(entryFee)+' owed</div>'+
         '</div>'+
-        '<span style="font-size:11px;font-weight:700;color:var(--c-tint);white-space:nowrap;">'+
-          'Mark as PAID</span>'+
+        _actionLabel(efPending)+
       '</button>';
   }
 
   $('mu-body').innerHTML = rows;
+  _wireManageUnpaidRows();
+}
 
-  // ---- Wire dues rows ----------------------------------------------
+function _wireManageUnpaidRows(){
+  var ctx = state.unpaidModalCtx;
+  var t = state.trip;
+  if(!ctx || !t) return;
+  var periods = ctx.periods || [];
+  var canMgmt = !!ctx.canMgmt;
+
+  // ---- Dues row clicks ----
   $('mu-body').querySelectorAll('[data-mu-dues-id]').forEach(function(btn){
+    if(btn.disabled) return;
     btn.onclick = function(){
       var duesId = btn.dataset.muDuesId;
       var p = periods.filter(function(x){
@@ -3980,33 +4038,26 @@ function openManageUnpaidModal(){
             amount:  p.amount, paid_amount: p.paid_amount
           });
         } else {
-          // Plain member — open the claim flow.
           openMyDuesClaim();
         }
       }, 180);
     };
   });
 
-  // ---- Wire entry-fee row -------------------------------------------
+  // ---- Entry fee row click ----
   $('mu-body').querySelectorAll('[data-mu-entry-fee]').forEach(function(btn){
+    if(btn.disabled) return;
     btn.onclick = function(){
       if(btn.disabled) return;
       var tag = btn.dataset.muEntryTag;
       var spanEl = btn.querySelector('span');
       var origLabel = spanEl ? spanEl.textContent : '';
-      // Common UX: lock the button and swap the label while the RPC
-      // is in flight. Both admin and member paths use the same
-      // visual treatment so the modal feels uniform.
       btn.disabled = true;
       if(spanEl) spanEl.textContent = 'Working…';
 
       if(tag === 'mark-entry-fee'){
-        // Admin / treasurer / global — record the entry fee paid in
-        // one tap. The target is whichever member the operator is
-        // viewing (or themselves on My Profile).
         sb.rpc('mark_entry_fee_paid', {
-          p_trip: t.trip_id,
-          p_dir:  ctx.targetDir
+          p_trip: t.trip_id, p_dir: ctx.targetDir
         }).then(function(res){
           btn.disabled = false;
           if(spanEl) spanEl.textContent = origLabel;
@@ -4018,14 +4069,9 @@ function openManageUnpaidModal(){
           closeModal('modal-manage-unpaid');
           _refreshAfterUnpaidAction();
         });
-
       } else if(tag === 'claim-entry-fee'){
-        // Plain member — files a claim. Admin/treasurer approves
-        // through the existing notifications/requests UI.
         sb.rpc('submit_entry_fee_payment_claim', {
-          p_trip:   t.trip_id,
-          p_amount: null,
-          p_note:   null
+          p_trip: t.trip_id, p_amount: null, p_note: null
         }).then(function(res){
           btn.disabled = false;
           if(spanEl) spanEl.textContent = origLabel;
@@ -4034,18 +4080,20 @@ function openManageUnpaidModal(){
             return;
           }
           toast('Claim submitted — waiting for admin approval');
-          closeModal('modal-manage-unpaid');
+          // Re-render the modal so the row flips to "Pending approval".
+          if(state.unpaidModalPending){
+            state.unpaidModalPending.entryFee = true;
+          }
+          _renderManageUnpaidBody();
         });
       } else {
-        // Unknown tag — restore UI.
         btn.disabled = false;
         if(spanEl) spanEl.textContent = origLabel;
       }
     };
   });
-
-  openModal('modal-manage-unpaid');
 }
+
 
 // Common refresh after a manage-unpaid action (admin mark paid, etc.).
 // Invalidates the dashboard cache and re-renders the current surface.
@@ -9842,6 +9890,7 @@ function renderNotifs(){
     var isLeave = (r.request_type === 'leave');
     var isMakeAdmin = (r.request_type === 'make_admin');
     var isDuesClaim = (r.request_type === 'dues_payment_claim');
+    var isEntryFeeClaim = (r.request_type === 'entry_fee_payment_claim');
     var headTxt;
     if(isLeave){
       headTxt = isRejected ? 'Leave request declined'
@@ -9855,6 +9904,10 @@ function renderNotifs(){
       headTxt = isRejected ? 'Dues claim declined'
               : isApproved ? 'Dues claim approved'
               : 'Dues payment claim';
+    }else if(isEntryFeeClaim){
+      headTxt = isRejected ? 'Entry fee claim declined'
+              : isApproved ? 'Entry fee claim approved'
+              : 'Entry fee payment claim';
     }
     h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'">'+
       '<div class="notif-head">'+headTxt+'</div>'+
@@ -9882,6 +9935,25 @@ function renderNotifs(){
         h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
              ' says they paid '+amt+
              (monthLbl ? ' for '+esc(monthLbl) : '')+'</div>';
+      }
+      if(r.note){
+        h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
+      }
+    }else if(isEntryFeeClaim){
+      // Mirror of dues claim, but for the one-time entry fee.
+      // requested_amount falls back to the trip's configured fee.
+      var efAmt = (r.requested_amount != null)
+        ? money(Number(r.requested_amount)||0)
+        : (r.trip_entry_fee_amount != null
+            ? money(Number(r.trip_entry_fee_amount)||0)
+            : '');
+      if(r.initiated_by_me){
+        h += '<div class="notif-title">Waiting for admin to confirm your entry fee payment'+
+             (efAmt ? ' ('+efAmt+')' : '')+'</div>';
+      } else {
+        h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
+             ' says they paid the entry fee'+
+             (efAmt ? ' ('+efAmt+')' : '')+'</div>';
       }
       if(r.note){
         h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
