@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.41">
+<meta name="app-version" content="V2-CLUB.42">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.41';
+var APP_VERSION = 'V2-CLUB.42';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5762,9 +5762,10 @@ function _updateMarkDuesHint(){
     hint.style.color = '#ff9f0a';
   } else if(typed > full + 0.005){
     // Backend mark_dues_paid distributes the extra across subsequent
-    // unpaid months for the same member. Raises if there's no room.
+    // months for the same member, auto-generating new month rows when
+    // none exist yet (up to 24 months ahead).
     hint.innerHTML = '<strong>Rolls forward:</strong> '+money(full)+' covers this month; the extra '+
-      money(typed - full)+' will be applied to the next unpaid month(s) automatically.';
+      money(typed - full)+' will pre-pay the next month(s) automatically.';
     hint.style.color = '#30d158';
   } else {
     hint.innerHTML = 'Full payment: '+money(full)+'.';
