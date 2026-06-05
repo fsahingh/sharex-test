@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.40">
+<meta name="app-version" content="V2-CLUB.41">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.40';
+var APP_VERSION = 'V2-CLUB.41';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3244,10 +3244,10 @@ function _renderClubDashboardMember(d, t, el, opts){
   var seeMembersBtn = opts.hideSeeMembersBtn ? '' :
     '<button id="md-see-members" type="button" '+
       'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
-      'align-items:center;gap:6px;padding:8px 12px;border-radius:999px;'+
-      'background:var(--c-tint);color:#fff;border:none;font-size:12px;'+
-      'font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(10,132,255,0.30);">'+
-      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
+      'align-items:center;gap:6px;padding:7px 11px;border-radius:999px;'+
+      'background:var(--c-bg);color:var(--c-text-2);border:1px solid var(--c-border);'+
+      'font-size:11.5px;font-weight:600;cursor:pointer;z-index:2;">'+
+      '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
       '<span>See members</span>'+
     '</button>';
 
@@ -3295,11 +3295,7 @@ function _renderClubDashboardMember(d, t, el, opts){
     '<div class="club-hero-card" style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
       (opts.chipBarHtml || '') +
       seeMembersBtn +
-      '<div style="display:grid;grid-template-columns:'+ringSize+'px 1fr;gap:14px;align-items:center;'+
-        // Push content down when the See Members button is overlaid so
-        // they don't collide on narrow screens. With chip bar present
-        // it isn't needed (chip bar already takes the top row).
-        (seeMembersBtn && !opts.chipBarHtml ? 'margin-top:36px;' : '')+'">'+
+      '<div style="display:grid;grid-template-columns:'+ringSize+'px 1fr;gap:14px;align-items:center;">'+
         // Left — avatar + ring
         '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
           ringSvg +
@@ -3734,9 +3730,10 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
          '</path>';
 }
 // Inline info row shown beneath the member ring when a month segment
-// is selected. The phrasing matches what the old toast used so the
-// transition (V2-CLUB.29) keeps the existing copy. Returns an empty
-// string when nothing is selected so the layout doesn't reserve space.
+// is selected. Styled to match the right-column readouts (uppercase
+// label + value) so it reads as a continuation of the hero card rather
+// than a separate card. Returns an empty string when nothing is
+// selected so the layout doesn't reserve space.
 function _renderMemberRingInfoRow(months, selectedPeriod){
   if(!selectedPeriod) return '';
   var m = (months || []).filter(function(x){ return x.period === selectedPeriod; })[0];
@@ -3744,32 +3741,35 @@ function _renderMemberRingInfoRow(months, selectedPeriod){
   var label = (m.label || '').charAt(0).toUpperCase() + (m.label || '').slice(1);
   var amt   = Number(m.amount || 0);
   var paid  = Number(m.paid_amount || 0);
-  var color, headline;
+  var valueColor;
+  var noteText;
   if(m.status === 'paid'){
-    color = '#30d158';
-    headline = label + ': paid ' + money(paid || amt);
+    valueColor = '#30d158';
+    noteText = 'Paid ' + money(paid || amt);
   } else if(m.status === 'partial'){
-    color = '#ff9f0a';
-    headline = label + ': ' + money(paid) + ' of ' + money(amt) +
-               ' — ' + money(amt - paid) + ' left';
+    valueColor = '#ff9f0a';
+    noteText = money(paid) + ' of ' + money(amt) + ' — ' + money(amt - paid) + ' left';
   } else if(m.status === 'current'){
-    color = '#0a84ff';
-    headline = label + ': current month — ' + money(amt) + ' due';
+    valueColor = '#0a84ff';
+    noteText = 'Current month — ' + money(amt) + ' due';
   } else if(m.status === 'unpaid'){
-    color = '#ff453a';
-    headline = label + ': ' + money(amt) + ' owed';
+    valueColor = '#ff453a';
+    noteText = money(amt) + ' owed';
   } else if(m.status === 'future'){
-    color = 'var(--c-text-3)';
-    headline = label + ': not billed yet';
+    valueColor = 'var(--c-text-3)';
+    noteText = 'Not billed yet';
   } else {
-    color = 'var(--c-text-3)';
-    headline = label + ': not a member';
+    valueColor = 'var(--c-text-3)';
+    noteText = 'Not a member';
   }
-  return '<div style="margin-top:14px;padding:10px 12px;background:var(--c-bg);'+
-      'border-radius:10px;display:flex;align-items:center;justify-content:space-between;'+
-      'gap:10px;">'+
-    '<div style="font-size:12.5px;color:var(--c-text);">'+esc(headline)+'</div>'+
-    '<span style="width:8px;height:8px;border-radius:50%;background:'+color+';flex-shrink:0;"></span>'+
+  // Matches the typographic rhythm of "CONTRIBUTED IN 2026" / value
+  // pair on the right side: a small uppercase grey label sitting
+  // above a larger coloured value. Plain text, no card frame.
+  return '<div style="margin-top:14px;">'+
+    '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.5px;">'+esc(label)+'</div>'+
+    '<div style="font-size:15px;font-weight:700;margin-top:2px;color:'+valueColor+';">'+
+      esc(noteText)+'</div>'+
   '</div>';
 }
 
