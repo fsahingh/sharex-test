@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.42">
+<meta name="app-version" content="V2-CLUB.43">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.42';
+var APP_VERSION = 'V2-CLUB.43';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3362,34 +3362,85 @@ function _renderClubDashboardMember(d, t, el, opts){
   // ---- "Your status" card: explains exactly what's owed. ----
   var statusCard;
   var unpaidPeriods = d.my_unpaid_periods || [];
-  // Entry fee owed lives outside the monthly dues stream. We surface
-  // it as an additional line in the status card so it's never silent.
   var entryFeeOwed = Number(d.my_entry_fee_owed || 0);
+
+  // Split unpaidPeriods into three buckets so the card and the modal
+  // show the right thing.
+  //   owedPeriods  : period <= current month AND paid < amount
+  //                  → what the member actually owes today
+  //   prepaidFuture: period >  current month AND paid > 0
+  //                  → already covered (partially / fully) ahead
+  //                    of schedule; positive, not a problem
+  //   futureUnpaid : period >  current month AND paid == 0
+  //                  → not yet billed; never surface in the card
+  var owedPeriods = [];
+  var prepaidFuture = [];
+  unpaidPeriods.forEach(function(p){
+    var paid = Number(p.paid_amount) || 0;
+    if(p.period > nowPeriod){
+      if(paid > 0) prepaidFuture.push(p);
+      // else: not billed yet — ignore
+    } else {
+      // current or past month with paid < amount
+      owedPeriods.push(p);
+    }
+  });
+  // Sort prepaid by period so they read chronologically.
+  prepaidFuture.sort(function(a, b){
+    return (a.period > b.period) ? 1 : -1;
+  });
+
   var entryFeeLine = entryFeeOwed > 0
     ? '<div style="font-size:11.5px;color:var(--c-text-2);margin-top:6px;'+
         'padding-top:6px;border-top:1px dashed var(--c-border);">'+
         '<strong>Also owes:</strong> '+money(entryFeeOwed)+' entry fee'+
       '</div>'
     : '';
-  // Distinguish "current month not yet paid" from "overdue months". The
-  // current month being unpaid is normal until it gets paid; truly
-  // overdue months are the ones the member should worry about.
-  var overdue = unpaidPeriods.filter(function(p){ return p.period < nowPeriod; });
-  var thisMonth = unpaidPeriods.filter(function(p){ return p.period === nowPeriod; });
-  if(unpaidPeriods.length === 0 && entryFeeOwed === 0){
+  // Pre-paid info line shown inside the green "All caught up" card so
+  // the member knows their extra payment was applied forward.
+  var prepaidLine = '';
+  if(prepaidFuture.length > 0){
+    var parts = prepaidFuture.map(function(p){
+      var paid = Number(p.paid_amount) || 0;
+      var full = Number(p.amount) || 0;
+      var lbl = p.label || '';
+      if(paid >= full) return lbl + ' (' + money(paid) + ' paid)';
+      return lbl + ' (' + money(paid) + ' of ' + money(full) + ')';
+    });
+    prepaidLine =
+      '<div style="font-size:11.5px;color:var(--c-text-2);margin-top:6px;'+
+        'padding-top:6px;border-top:1px dashed var(--c-border);">'+
+        '<strong>Pre-paid:</strong> '+esc(parts.join(', '))+
+      '</div>';
+  }
+  // Current-month vs strictly-overdue (used for the headline + colour).
+  var overdue = owedPeriods.filter(function(p){ return p.period < nowPeriod; });
+  var thisMonth = owedPeriods.filter(function(p){ return p.period === nowPeriod; });
+  // Sum amounts actually owed today (current + past), partial-aware.
+  var totalOwed = 0;
+  owedPeriods.forEach(function(p){
+    var paid = Number(p.paid_amount) || 0;
+    var full = Number(p.amount) || 0;
+    totalOwed += Math.max(0, full - paid);
+  });
+  if(owedPeriods.length === 0 && entryFeeOwed === 0){
     statusCard =
       '<div style="background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.32);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;">'+
         '<div style="display:flex;align-items:center;gap:10px;">'+
           '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#30d158;color:#fff;align-items:center;justify-content:center;flex-shrink:0;">'+
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'+
           '</span>'+
-          '<div>'+
+          '<div style="flex:1;min-width:0;">'+
             '<div style="font-size:15px;font-weight:700;color:#30d158;">Paid — All caught up</div>'+
-            '<div style="font-size:12px;color:var(--c-text-2);margin-top:1px;">Nothing owed right now.</div>'+
+            '<div style="font-size:12px;color:var(--c-text-2);margin-top:1px;">'+
+              (prepaidFuture.length > 0
+                ? 'Your extra payment is applied to upcoming months.'
+                : 'Nothing owed right now.')+'</div>'+
+            prepaidLine +
           '</div>'+
         '</div>'+
       '</div>';
-  } else if(unpaidPeriods.length === 0 && entryFeeOwed > 0){
+  } else if(owedPeriods.length === 0 && entryFeeOwed > 0){
     // Entry fee only — clickable for everyone. Role decides what
     // happens on click (admin: Edit Person; member: claim flow / toast).
     var efClickable = true;
@@ -3407,8 +3458,9 @@ function _renderClubDashboardMember(d, t, el, opts){
         '</div>'+
       '</div>';
   } else {
-    // Build a readable summary: amount + month names.
-    var monthNames = unpaidPeriods.map(function(p){ return p.label; }).join(', ');
+    // Build a readable summary: amount + month names. We exclude
+    // prepaid-future months because they're not actually owed.
+    var monthNames = owedPeriods.map(function(p){ return p.label; }).join(', ');
     var color = overdue.length ? '#ff453a' : '#ff9f0a';
     var bg    = overdue.length ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)';
     var border= overdue.length ? 'rgba(255,69,58,0.34)' : 'rgba(255,159,10,0.34)';
@@ -3428,9 +3480,10 @@ function _renderClubDashboardMember(d, t, el, opts){
           '<span style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:'+color+';color:#fff;align-items:center;justify-content:center;flex-shrink:0;font-weight:800;">○</span>'+
           '<div style="flex:1;min-width:0;">'+
             '<div style="font-size:15px;font-weight:700;color:'+color+';">'+esc(headline)+'</div>'+
-            '<div style="font-size:13px;color:var(--c-text);margin-top:2px;"><strong>'+money(d.my_unpaid_total||0)+'</strong> across '+unpaidPeriods.length+' month'+(unpaidPeriods.length===1?'':'s')+'</div>'+
+            '<div style="font-size:13px;color:var(--c-text);margin-top:2px;"><strong>'+money(totalOwed)+'</strong> across '+owedPeriods.length+' month'+(owedPeriods.length===1?'':'s')+'</div>'+
             '<div style="font-size:11px;color:var(--c-text-3);margin-top:3px;">'+esc(monthNames)+'</div>'+
             entryFeeLine +
+            prepaidLine +
           '</div>'+
           (upClickable ? '<span style="font-size:18px;color:var(--c-text-3);flex-shrink:0;">›</span>' : '') +
         '</div>'+
@@ -3454,11 +3507,11 @@ function _renderClubDashboardMember(d, t, el, opts){
   var canManagePaid = (opts.isViewing || opts.showManageUnpaid || roleHasMgmt);
   var manageUnpaidCard = '';   // intentionally empty; modal owns this UI now
   // Cache enough context that the status-card click handler can open
-  // the Manage Unpaid modal without re-deriving anything. Populated
-  // for any caller — admin (mark paid), member (request approval) —
-  // because the modal itself decides which action to surface per row.
+  // the Manage Unpaid modal without re-deriving anything. Periods is
+  // OWED-only (current+past with paid<amount). Future prepaid months
+  // are positive and shouldn't appear as actionable rows.
   state.unpaidModalCtx = {
-    periods:        unpaidPeriods,
+    periods:        owedPeriods,
     viewingName:    opts.viewingName || meName,
     targetDir:      (state.viewingMember && state.viewingMember.directory_id)
                     || (t && t.my_directory_id),
