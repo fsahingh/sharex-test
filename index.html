@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.37">
+<meta name="app-version" content="V2-CLUB.38">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.37';
+var APP_VERSION = 'V2-CLUB.38';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3293,10 +3293,40 @@ function _renderClubDashboardMember(d, t, el, opts){
         // Left — avatar + ring
         '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
           ringSvg +
-          '<div data-mr-reset="1" style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
-            'display:flex;align-items:center;justify-content:center;'+
-            'font-size:36px;font-weight:700;color:var(--c-text);'+
-            'cursor:pointer;">'+esc(meInitials)+'</div>'+
+          // Avatar disc shows the member's name on two lines — first
+          // name on top, last name below. Falls back to initials if
+          // we couldn't split a clean two-word name (e.g. global admin
+          // viewing without a directory row, single-word display names).
+          (function(){
+            var first = '', last = '';
+            if(opts.viewingName){
+              var parts = String(opts.viewingName).trim().split(/\s+/);
+              first = parts[0] || '';
+              last  = parts.slice(1).join(' ');
+            } else if(meMember){
+              first = (meMember.first_name || '').trim();
+              last  = (meMember.last_name  || '').trim();
+            } else if(state.profile){
+              first = (state.profile.first_name || '').trim();
+              last  = (state.profile.last_name  || '').trim();
+            }
+            var hasTwoLines = !!(first && last);
+            // Font size shrinks with available space — the disc is
+            // discInset px from each edge, so its width = ringSize-2*discInset.
+            var maxChars = Math.max((first||'').length, (last||'').length, 4);
+            var nameFont = ringSize >= 240
+              ? (maxChars > 8 ? 16 : 19)
+              : (maxChars > 8 ? 14 : 17);
+            var inner = hasTwoLines
+              ? '<div style="font-size:'+nameFont+'px;font-weight:700;line-height:1.15;">'+esc(first)+'</div>'+
+                '<div style="font-size:'+nameFont+'px;font-weight:700;line-height:1.15;margin-top:2px;">'+esc(last)+'</div>'
+              : '<div style="font-size:36px;font-weight:700;">'+esc(meInitials)+'</div>';
+            return '<div data-mr-reset="1" style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
+              'display:flex;flex-direction:column;align-items:center;justify-content:center;'+
+              'color:var(--c-text);cursor:pointer;text-align:center;padding:6px;">'+
+              inner +
+            '</div>';
+          })()+
         '</div>'+
         // Right — personal read-outs
         '<div style="min-width:0;display:flex;flex-direction:column;gap:14px;">'+
@@ -3595,8 +3625,7 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
     var isPulse = !!(opts.pulsePeriod && m.period === opts.pulsePeriod);
     // Selected segment: matches the admin club ring pattern — give it
-    // a thicker stroke so the highlight reads at a glance. Selected
-    // wins over pulse when both are true (current month + selected).
+    // a thicker stroke so the highlight reads at a glance.
     var isSelected = !!(opts.selectedPeriod && m.period === opts.selectedPeriod);
     var strokeW = thickness;
     if(isPulse)    strokeW = thickness + 6;
@@ -3604,9 +3633,12 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
       strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
-    if(isPulse){
-      // Reuse the admin halo helper — same "heartbeat" cue everywhere.
-      halos += _clubHaloArc(cx, cy, r + thickness/2 + 6, startDeg, endDeg);
+    // Heartbeat halo follows the *selected* segment (when one is
+    // chosen) so the user can confirm what they just tapped. We draw
+    // it on the inside of the ring so it doesn't overlap the month
+    // labels that sit just outside.
+    if(isSelected){
+      halos += _clubHaloArc(cx, cy, r - thickness/2 - 6, startDeg, endDeg);
     }
     if(opts.showLabels){
       // Position each 3-letter label just outside the ring at the
