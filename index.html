@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.45">
+<meta name="app-version" content="V2-CLUB.46">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.45';
+var APP_VERSION = 'V2-CLUB.46';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3200,7 +3200,24 @@ function _renderClubDashboardMember(d, t, el, opts){
   // discInset is reused by the renderer to centre the halo between
   // the ring's inner edge and the centre disc.
   var discInset = (ringSize >= 240) ? 50 : 42;
-  var ringSvg = _renderYearRingSvg(months, ringSize, ringStroke, 4, {
+  // Future-month status remap: the backend tags any month with
+  // paid<amount as "partial" or "unpaid" regardless of whether the
+  // month is in the future. From the member's perspective, a future
+  // month that's only partially prepaid (or untouched) isn't actually
+  // a debt — it just hasn't arrived yet. We collapse both to a muted
+  // 'future' status here so the ring + halo + info row read calmly.
+  // paid_amount is preserved so the info row can still say "thanks
+  // for the prepayment" with the right numbers.
+  var displayMonths = (months || []).map(function(m){
+    if(m.period > d.current_period && m.status !== 'paid'){
+      var copy = {};
+      for(var k in m){ if(Object.prototype.hasOwnProperty.call(m,k)) copy[k]=m[k]; }
+      copy.status = 'future';
+      return copy;
+    }
+    return m;
+  });
+  var ringSvg = _renderYearRingSvg(displayMonths, ringSize, ringStroke, 4, {
     showLabels: true,
     pulsePeriod: d.current_period,
     selectedPeriod: memberSelected,
@@ -3347,7 +3364,7 @@ function _renderClubDashboardMember(d, t, el, opts){
       // ring + info column and the legend so the connection to the
       // ring is visible. When nothing is selected this row is hidden
       // (CSS) to avoid taking permanent space.
-      _renderMemberRingInfoRow(months, memberSelected) +
+      _renderMemberRingInfoRow(displayMonths, memberSelected, d.current_period) +
       // Legend below the hero — tiny and unobtrusive.
       '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
             'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
@@ -3832,21 +3849,34 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
 }
 // Inline info row shown beneath the member ring when a month segment
 // is selected. Styled to match the right-column readouts (uppercase
-// label + value) so it reads as a continuation of the hero card rather
-// than a separate card. Returns an empty string when nothing is
-// selected so the layout doesn't reserve space.
-function _renderMemberRingInfoRow(months, selectedPeriod){
+// label + value) so it reads as a continuation of the hero card.
+// Future months get gentler copy — they're not overdue, just upcoming.
+function _renderMemberRingInfoRow(months, selectedPeriod, currentPeriod){
   if(!selectedPeriod) return '';
   var m = (months || []).filter(function(x){ return x.period === selectedPeriod; })[0];
   if(!m) return '';
   var label = (m.label || '').charAt(0).toUpperCase() + (m.label || '').slice(1);
   var amt   = Number(m.amount || 0);
   var paid  = Number(m.paid_amount || 0);
+  var isFuture = !!(currentPeriod && m.period > currentPeriod);
   var valueColor;
   var noteText;
   if(m.status === 'paid'){
+    // Fully paid — green either way, with an extra thank-you for
+    // months that haven't even arrived yet.
     valueColor = '#30d158';
-    noteText = 'Paid ' + money(paid || amt);
+    noteText = isFuture
+      ? 'Paid in full ahead of schedule — thank you!'
+      : 'Paid ' + money(paid || amt);
+  } else if(isFuture){
+    // Future month, not fully paid. Muted gray; gentle copy that
+    // doesn't read as a debt.
+    valueColor = 'var(--c-text-3)';
+    if(paid > 0){
+      noteText = 'Thank you for your prepayment — '+money(amt - paid)+' upcoming for this month.';
+    } else {
+      noteText = 'Upcoming '+money(amt)+'. Payable during the month.';
+    }
   } else if(m.status === 'partial'){
     valueColor = '#ff9f0a';
     noteText = money(paid) + ' of ' + money(amt) + ' — ' + money(amt - paid) + ' left';
@@ -3857,15 +3887,16 @@ function _renderMemberRingInfoRow(months, selectedPeriod){
     valueColor = '#ff453a';
     noteText = money(amt) + ' owed';
   } else if(m.status === 'future'){
+    // Defensive: if the caller didn't pass currentPeriod, fall back
+    // to the old phrasing.
     valueColor = 'var(--c-text-3)';
-    noteText = 'Not billed yet';
+    noteText = paid > 0
+      ? 'Thank you for your prepayment — '+money(amt - paid)+' upcoming.'
+      : 'Upcoming '+money(amt)+'.';
   } else {
     valueColor = 'var(--c-text-3)';
     noteText = 'Not a member';
   }
-  // Matches the typographic rhythm of "CONTRIBUTED IN 2026" / value
-  // pair on the right side: a small uppercase grey label sitting
-  // above a larger coloured value. Plain text, no card frame.
   return '<div style="margin-top:14px;">'+
     '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
         'text-transform:uppercase;letter-spacing:0.5px;">'+esc(label)+'</div>'+
@@ -4823,6 +4854,75 @@ function _auditLabel(ev){
   }
 }
 
+// =====================================================================
+//  PAYMENT METHOD PICKER (used in I Pay Dues modal)
+// =====================================================================
+// Tap-to-select grid replaces the freeform Note input on the claim
+// modal. The selected button feeds the note field on submit so the
+// admin still sees "Cash" / "Zelle" / etc. in the bell. "Other"
+// reveals a short text input for anything bespoke. Default = Cash
+// because that's the most common case in the user's testing.
+function _renderPaymentMethodPicker(){
+  var methods = [
+    { val:'cash',   label:'Cash'   },
+    { val:'zelle',  label:'Zelle'  },
+    { val:'paypal', label:'PayPal' },
+    { val:'venmo',  label:'Venmo'  },
+    { val:'other',  label:'Other'  }
+  ];
+  var grid = '';
+  methods.forEach(function(m){
+    grid +=
+      '<button type="button" data-pm-val="'+esc(m.val)+'" '+
+        'style="padding:9px 12px;background:var(--c-bg);border:1px solid var(--c-border);'+
+        'border-radius:8px;font-size:13px;font-weight:600;color:var(--c-text);cursor:pointer;'+
+        'font-family:inherit;">'+esc(m.label)+'</button>';
+  });
+  return '<label style="margin-top:14px;">How did you pay?</label>'+
+    '<div id="dc-method-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px;">'+grid+'</div>'+
+    '<input type="text" id="dc-other-note" class="field" hidden style="margin-top:8px;" placeholder="How? (e.g. wire transfer)" maxlength="200">';
+}
+
+// Wires the buttons after the modal body is rendered. Applies the
+// default-selected style and shows/hides the Other input.
+function _wirePaymentMethodPicker(){
+  var grid = document.getElementById('dc-method-grid');
+  if(!grid) return;
+  function applySelectionStyle(){
+    grid.querySelectorAll('[data-pm-val]').forEach(function(b){
+      var selected = b.dataset.pmVal === (state.duesClaimMethod || 'cash');
+      b.style.background = selected ? 'var(--c-tint)' : 'var(--c-bg)';
+      b.style.color      = selected ? '#fff'          : 'var(--c-text)';
+      b.style.borderColor= selected ? 'var(--c-tint)' : 'var(--c-border)';
+    });
+    var other = document.getElementById('dc-other-note');
+    if(other) other.hidden = (state.duesClaimMethod !== 'other');
+  }
+  grid.querySelectorAll('[data-pm-val]').forEach(function(b){
+    b.onclick = function(){
+      state.duesClaimMethod = b.dataset.pmVal;
+      applySelectionStyle();
+    };
+  });
+  applySelectionStyle();
+}
+
+// Returns the note string the backend stores — method label for named
+// providers, the freeform text (or 'Other') for the Other branch.
+function _composeClaimNote(){
+  var method = state.duesClaimMethod || 'cash';
+  var labels = {
+    cash:'Cash', zelle:'Zelle', paypal:'PayPal',
+    venmo:'Venmo', other:'Other'
+  };
+  if(method === 'other'){
+    var t = (document.getElementById('dc-other-note') || {}).value;
+    t = (t || '').trim();
+    return t || 'Other';
+  }
+  return labels[method] || null;
+}
+
 // "I paid dues" claim flow. Fetches the caller's unpaid/partial dues
 // rows, lets them pick which month + amount + optional note, and
 // submits via submit_dues_payment_claim. Admin/treasurer see it as a
@@ -4912,10 +5012,11 @@ async function openMyDuesClaim(){
         '<input type="number" id="dc-prepay-amount" class="field" min="0" step="0.01" placeholder="0.00">'+
         '<div id="dc-prepay-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">'+
           esc(suggest)+'</div>'+
-        '<label for="dc-prepay-note" style="margin-top:14px;">Note (optional)</label>'+
-        '<input type="text" id="dc-prepay-note" class="field" maxlength="200" placeholder="e.g. Venmo on Jun 5">';
+        _renderPaymentMethodPicker();
+      state.duesClaimMethod = 'cash';
       $('dc-submit').disabled = false;
       $('dc-submit').textContent = 'Submit prepayment';
+      _wirePaymentMethodPicker();
       return;
     }
     state.duesClaimMode = 'unpaid';
@@ -4940,8 +5041,9 @@ async function openMyDuesClaim(){
       '<div id="dc-amount-hint" style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">'+
         'Defaults to the full balance for the picked month. Paying less marks the month as partial; paying more is capped at the full amount — extra goes into the pool but no future month is credited automatically.'+
       '</div>'+
-      '<label for="dc-note" style="margin-top:14px;">Note (optional)</label>'+
-      '<input type="text" id="dc-note" class="field" maxlength="200" placeholder="e.g. Venmo on May 18">';
+      _renderPaymentMethodPicker();
+    state.duesClaimMode = 'unpaid';
+    state.duesClaimMethod = 'cash';
 
     // When the month changes, default the amount to that row's balance.
     $('dc-month').addEventListener('change', function(){
@@ -4962,6 +5064,10 @@ async function openMyDuesClaim(){
     // Run once on open so the placeholder hint is replaced as soon as
     // the user has a month selected (auto-defaulted amount included).
     _updateDuesClaimHint();
+    // Wire the payment method picker (Cash / Zelle / ...). Safe to
+    // call here in both paths because the picker is included on the
+    // unpaid form; if it's absent (no-op), the helper returns early.
+    _wirePaymentMethodPicker();
   }catch(err){
     $('dc-body').innerHTML =
       '<div class="empty"><div class="empty-title">Could not load</div>'+
@@ -4975,7 +5081,7 @@ async function submitMyDuesClaim(){
   // state.duesClaimMode is set when the modal body is built.
   if(state.duesClaimMode === 'prepayment'){
     var prepayAmt  = parseFloat(($('dc-prepay-amount')||{}).value);
-    var prepayNote = (($('dc-prepay-note')||{}).value || '').trim() || null;
+    var prepayNote = _composeClaimNote();
     if(!(prepayAmt > 0)){ setMsg('Enter an amount.'); return; }
     btn.disabled = true; btn.textContent = 'Submitting…';
     try{
@@ -5001,7 +5107,7 @@ async function submitMyDuesClaim(){
   var sel = $('dc-month');
   var duesId = sel ? sel.value : '';
   var amt    = parseFloat($('dc-amount').value);
-  var note   = ($('dc-note').value || '').trim() || null;
+  var note   = _composeClaimNote();
   if(!duesId){ setMsg('Pick a month.'); return; }
   if(!(amt > 0)){ setMsg('Enter the amount you paid.'); return; }
   // No client-side cap: the backend now rolls extras forward across
