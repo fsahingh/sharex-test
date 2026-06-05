@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.38">
+<meta name="app-version" content="V2-CLUB.39">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.38';
+var APP_VERSION = 'V2-CLUB.39';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3184,15 +3184,17 @@ function _renderClubDashboardMember(d, t, el, opts){
   // at different scales.
   var ringSize = _clubRingSize();
   var ringStroke = (ringSize >= 240) ? 16 : 14;
-  // Selected period for the member ring follows the same "tap to
-  // select, tap centre to reset" pattern as the admin club ring.
-  // We keep the selection in a separate state key so the two surfaces
-  // don't fight each other when the admin switches views.
-  var memberSelected = state.memberSelectedMonth || null;
+  // Member ring selection: explicit pick wins; otherwise default to
+  // the current month so the halo is visible on first open.
+  var memberSelected = state.memberSelectedMonth || d.current_period || null;
+  // discInset is reused by the renderer to centre the halo between
+  // the ring's inner edge and the centre disc.
+  var discInset = (ringSize >= 240) ? 50 : 42;
   var ringSvg = _renderYearRingSvg(months, ringSize, ringStroke, 4, {
     showLabels: true,
     pulsePeriod: d.current_period,
-    selectedPeriod: memberSelected
+    selectedPeriod: memberSelected,
+    discInset: discInset
   });
 
   // ---- Viewing-mode header (admin viewing another member) ----
@@ -3223,9 +3225,7 @@ function _renderClubDashboardMember(d, t, el, opts){
         '</div>'+
       '</div>'
     : '';
-  // Centre disc inset scales with the ring so the avatar disc keeps
-  // a consistent visual ratio across both sizes.
-  var discInset = (ringSize >= 240) ? 50 : 42;
+  // (discInset already declared above so the ring renderer can use it.)
 
   // "See members" button — pinned to the top-right corner of the hero
   // card. Same accent treatment as the FAB so the two member actions
@@ -3633,12 +3633,19 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
       strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
-    // Heartbeat halo follows the *selected* segment (when one is
-    // chosen) so the user can confirm what they just tapped. We draw
-    // it on the inside of the ring so it doesn't overlap the month
-    // labels that sit just outside.
+    // Heartbeat halo follows the *selected* segment so the user can
+    // confirm what they just tapped. Drawn inside the ring, centred
+    // in the gap between the segment's inner edge and the centre
+    // disc — that way it doesn't overlap the outer month labels and
+    // it sits visually balanced when the inner disc is present.
     if(isSelected){
-      halos += _clubHaloArc(cx, cy, r - thickness/2 - 6, startDeg, endDeg);
+      // Inner edge of the segment + outer edge of the centre disc,
+      // averaged to land in the middle of the gap. Falls back to a
+      // fixed offset when the caller didn't pass discInset.
+      var segInner = r - thickness/2;
+      var discR = (opts.discInset != null) ? (cx - opts.discInset) : (segInner - 12);
+      var haloR = (segInner + discR) / 2;
+      halos += _clubHaloArc(cx, cy, haloR, startDeg, endDeg);
     }
     if(opts.showLabels){
       // Position each 3-letter label just outside the ring at the
@@ -4892,14 +4899,18 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   // Stroke scales gently with the ring so the segments still read as
   // bold arcs at 200px on mobile and at 240px on desktop.
   var ringStroke = (ringSize >= 240) ? 16 : 14;
-  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 5,
-    state.clubSelectedMonth, d.current_period);
-  var clubName = t.name || 'Club';
-  // Truncate club names so the centre disc text always fits.
-  var clubLabel = (clubName.length > 9) ? (clubName.slice(0, 8) + '…') : clubName;
+  // Selected month defaults to the current period so the halo is
+  // visible the moment the page opens. Once the admin taps a segment
+  // (state.clubSelectedMonth) that pick wins.
+  var adminSelected = state.clubSelectedMonth || d.current_period;
   // Centre disc inset depends on ring size so the inner circle keeps
   // a consistent ratio (stroke + padding stays ~constant).
   var discInset = (ringSize >= 240) ? 46 : 38;
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 5,
+    adminSelected, d.current_period, discInset);
+  var clubName = t.name || 'Club';
+  // Truncate club names so the centre disc text always fits.
+  var clubLabel = (clubName.length > 9) ? (clubName.slice(0, 8) + '…') : clubName;
 
   // ---- Right-side info panel ----
   // Stat rows: Pool Balance + Over Dues are year-wide; IN/OUT update
@@ -5177,7 +5188,7 @@ function _statRow(label, value, opts){
 //     which month was tapped
 // =====================================================================
 function _renderClubYearRingSvg(months, size, thickness, gapDeg,
-                                selectedPeriod, currentPeriod){
+                                selectedPeriod, currentPeriod, discInset){
   if(!months || !months.length){
     return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'"></svg>';
   }
@@ -5209,13 +5220,15 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
       isSelected ? thickness + 6 : thickness,
       m.label_full || '', m.period, m.status, isSelected);
     // Halo overlay for the selected segment: a second concentric arc
-    // sitting just outside the ring, in the accent colour, with a
+    // sitting inside the ring, in the accent colour, with a
     // synchronised stroke-width + opacity pulse so it reads as a
-    // heartbeat. SMIL is supported in every iOS/Android browser we
-    // target, and the animation runs entirely in the GPU so it costs
-    // nothing perf-wise.
+    // heartbeat. Drawn inside (between the segment's inner edge and
+    // the centre disc) so it doesn't overlap the month labels.
     if(isSelected){
-      halos += _clubHaloArc(cx, cy, r + thickness/2 + 6, startDeg, endDeg);
+      var segInner = r - thickness/2;
+      var discR = (discInset != null) ? (cx - discInset) : (segInner - 12);
+      var haloR = (segInner + discR) / 2;
+      halos += _clubHaloArc(cx, cy, haloR, startDeg, endDeg);
     }
     // 3-letter label outside the ring, midpoint angle, upright text.
     var midDeg = (startDeg + endDeg) / 2;
