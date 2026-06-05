@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.44">
+<meta name="app-version" content="V2-CLUB.45">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.44';
+var APP_VERSION = 'V2-CLUB.45';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3531,15 +3531,60 @@ function _renderClubDashboardMember(d, t, el, opts){
     // finance — keep them out of the member surface so it stays
     // focused on the member's own money flow.
     if(ev.kind === 'audit') return false;
-    // Best signal we have on the global feed is the actor display name —
-    // match it against the caller's display name.
     if(meName && ev.actor === meName) return true;
     return false;
   });
+
+  // Pending claims this member submitted (dues payment + entry fee).
+  // We surface them here as yellow rows so the member sees their own
+  // submissions sitting in the activity feed alongside completed
+  // items, instead of having to hunt for them in the bell. The bell
+  // suppresses these same rows (renderNotifs filter) so we don't
+  // double-show them. Once the admin approves, the real expense row
+  // (dues_paid / pool_in) supersedes this pending entry naturally.
+  var myPendingClaims = (state.memberRequests || []).filter(function(r){
+    return r && r.status === 'pending'
+        && r.initiated_by_me === true
+        && String(r.trip_id) === String(t.trip_id)
+        && (r.request_type === 'dues_payment_claim'
+            || r.request_type === 'entry_fee_payment_claim');
+  }).map(function(r){
+    return {
+      kind:      'pending_claim',
+      pending:   true,
+      at:        r.created_at,
+      amount:    r.requested_amount,
+      period_label: r.dues_period_label,
+      request_type: r.request_type
+    };
+  });
+
+  // Merge + sort by timestamp descending; first 5 land in the card,
+  // the rest are reachable via "View all activity".
+  var mergedEvents = personalEvents.concat(myPendingClaims).sort(function(a, b){
+    var ta = a.at ? new Date(a.at).getTime() : 0;
+    var tb = b.at ? new Date(b.at).getTime() : 0;
+    return tb - ta;
+  });
+
   var recentRows = '';
-  personalEvents.slice(0, 5).forEach(function(ev){
+  mergedEvents.slice(0, 5).forEach(function(ev){
     var sign, color, lbl;
-    if(ev.kind === 'expense'){
+    var rightAmount, statusBadge = '';
+    if(ev.kind === 'pending_claim'){
+      // Pending row — yellow amount + small "Pending" pill in title.
+      var isEntry = ev.request_type === 'entry_fee_payment_claim';
+      lbl = isEntry
+        ? 'Payment for entry fee'
+        : ('Payment for ' + (ev.period_label || 'dues'));
+      color = '#ff9f0a';
+      sign = '+';
+      statusBadge =
+        '<span style="display:inline-block;font-size:9.5px;font-weight:700;'+
+        'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+        'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
+        'Pending</span>';
+    } else if(ev.kind === 'expense'){
       sign = '-'; color = '#ff453a';
       lbl = ev.description || 'Expense';
     } else if(ev.kind === 'pool_in'){
@@ -3551,11 +3596,14 @@ function _renderClubDashboardMember(d, t, el, opts){
     }
     var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
       {month:'short', day:'numeric'}) : '';
+    var subline = ev.kind === 'pending_claim'
+      ? (when + ' · Waiting for admin approval')
+      : (when || '');
     recentRows +=
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
         '<div style="min-width:0;">'+
-          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
-          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+(when?when:'')+'</div>'+
+          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+ statusBadge +'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(subline)+'</div>'+
         '</div>'+
         '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
       '</div>';
@@ -4174,7 +4222,7 @@ function _wireManageUnpaidRows(){
       } else if(tag === 'claim-entry-fee'){
         sb.rpc('submit_entry_fee_payment_claim', {
           p_trip: t.trip_id, p_amount: null, p_note: null
-        }).then(function(res){
+        }).then(async function(res){
           btn.disabled = false;
           if(spanEl) spanEl.textContent = origLabel;
           if(res.error){
@@ -4182,11 +4230,12 @@ function _wireManageUnpaidRows(){
             return;
           }
           toast('Claim submitted — waiting for admin approval');
-          // Re-render the modal so the row flips to "Pending approval".
-          if(state.unpaidModalPending){
-            state.unpaidModalPending.entryFee = true;
-          }
-          _renderManageUnpaidBody();
+          // Refresh memberRequests so the pending row appears under
+          // Recent Activity on the dashboard. The modal can stay open
+          // briefly so the user sees the toast.
+          await refreshNotifs();
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
         });
       } else {
         btn.disabled = false;
@@ -4939,6 +4988,7 @@ async function submitMyDuesClaim(){
       closeModal('modal-dues-claim');
       toast('Prepayment submitted — your admin will review it');
       state.clubDashboardLoadedFor = null;
+      await refreshNotifs();
       renderClubDashboardTab();
     }catch(err){
       setMsg(err.message || 'Could not submit.');
@@ -4965,7 +5015,10 @@ async function submitMyDuesClaim(){
     if(res.error) throw res.error;
     closeModal('modal-dues-claim');
     toast('Claim submitted — your admin will review it');
+    // Refresh both the dashboard and the bell-state so the new pending
+    // claim shows up immediately in Recent Activity.
     state.clubDashboardLoadedFor = null;
+    await refreshNotifs();
     renderClubDashboardTab();
   }catch(err){
     setMsg(err.message || 'Could not submit.');
@@ -10010,9 +10063,17 @@ async function refreshNotifs(){
   }
   // Best-effort lazy expire of stale member requests (3 days). Cheap RPC.
   try{ sb.rpc('auto_expire_member_requests'); }catch(e){}
-  // Badge count excludes anything the user dismissed locally.
+  // Badge count excludes anything the user dismissed locally and
+  // hides the caller's own still-pending dues / entry-fee claims
+  // (Recent Activity shows them now).
   var notifsUnseen = (state.notifs || []).filter(function(x){ return !_isDismissedLocally(x.id); });
-  var membUnseen   = (state.memberRequests || []).filter(function(x){ return !_isDismissedLocally(x.id); });
+  var membUnseen   = (state.memberRequests || []).filter(function(x){
+    if(_isDismissedLocally(x.id)) return false;
+    if(x && x.status === 'pending' && x.initiated_by_me &&
+       (x.request_type === 'dues_payment_claim'
+        || x.request_type === 'entry_fee_payment_claim')) return false;
+    return true;
+  });
   var n = notifsUnseen.length + state.accessRequests.length + membUnseen.length;
   ['bell-badge','bell-badge-2','bell-badge-3'].forEach(function(id){
     var el = $(id);
@@ -10034,12 +10095,26 @@ function openNotifs(){
 
 function renderNotifs(){
   var el = $('notif-body');
-  // Filter out anything the user has locally dismissed.
+  // Filter out anything the user has locally dismissed. Also hide the
+  // caller's OWN still-pending dues / entry-fee claims — those surface
+  // inside Recent Activity on the dashboard now, so showing them twice
+  // would be noise. Resolved (approved / rejected) claims still appear
+  // here so the member learns the outcome.
+  function _ownPendingClaim(r){
+    return r && r.status === 'pending'
+      && r.initiated_by_me === true
+      && (r.request_type === 'dues_payment_claim'
+          || r.request_type === 'entry_fee_payment_claim');
+  }
   var rawList = state.notifs || [];
   var rawMemb = state.memberRequests || [];
   var list = rawList.filter(function(x){ return !_isDismissedLocally(x.id); });
   var access = state.accessRequests || [];
-  var memb = rawMemb.filter(function(x){ return !_isDismissedLocally(x.id); });
+  var memb = rawMemb.filter(function(x){
+    if(_isDismissedLocally(x.id)) return false;
+    if(_ownPendingClaim(x)) return false;
+    return true;
+  });
   if(list.length === 0 && access.length === 0 && memb.length === 0){
     el.innerHTML =
       '<div class="empty"><div class="empty-title">No notifications</div>'+
