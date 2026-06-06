@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.48">
+<meta name="app-version" content="V2-CLUB.49">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.48';
+var APP_VERSION = 'V2-CLUB.49';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5332,7 +5332,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   }
 
   var infoPanel =
-    '<div style="flex:1;min-width:170px;display:flex;flex-direction:column;gap:12px;">'+
+    '<div style="flex:1;min-width:170px;display:flex;flex-direction:column;gap:12px;text-align:right;align-items:flex-end;">'+
       _statRow('Pool Balance', money(d.pool_balance||0),
                { id:'ss-pool-balance', clickable:true,
                  hint:'tap for breakdown' }) +
@@ -5344,7 +5344,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('OUT ('+esc(selected && selected.label_short || '')+')',
                '-'+money(monthOut), { color:'#ff453a' }) +
       '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;'+
-            'display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+            'display:flex;align-items:center;justify-content:flex-end;gap:8px;">'+
         '<span><strong style="color:var(--c-text);">Selected:</strong> '+esc(selectedLabel)+
           (isCurrentSelected ? '' : ' <a href="#" id="ss-reset-month" '+
             'style="color:var(--c-tint);text-decoration:none;font-weight:700;">(reset)</a>') +
@@ -5561,7 +5561,11 @@ function _statRow(label, value, opts){
   // row opens a modal. We keep the structure the same so the layout
   // doesn't shift between clickable and static rows.
   var idAttr = opts.id ? ' id="'+esc(opts.id)+'"' : '';
-  var wrapStyle = opts.clickable ? 'cursor:pointer;' : '';
+  // Right-alignment is set on the row itself so it works regardless of
+  // the parent container. Pairs with the parent's align-items:flex-end
+  // to land the row against the card's right edge with content also
+  // reading right-to-left.
+  var wrapStyle = 'text-align:right;' + (opts.clickable ? 'cursor:pointer;' : '');
   var arrow = opts.clickable
     ? '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>'
     : '';
@@ -5569,7 +5573,7 @@ function _statRow(label, value, opts){
     '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
           'text-transform:uppercase;letter-spacing:0.5px;">'+esc(label)+'</div>'+
     '<div style="font-size:18px;font-weight:800;margin-top:2px;color:'+color+';'+
-          'display:inline-flex;align-items:center;">'+value+arrow+'</div>'+
+          'display:inline-flex;align-items:center;justify-content:flex-end;">'+value+arrow+'</div>'+
     hint +
     '</div>';
 }
