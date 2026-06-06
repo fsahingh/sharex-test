@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.50">
+<meta name="app-version" content="V2-CLUB.51">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.50';
+var APP_VERSION = 'V2-CLUB.51';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3557,13 +3557,52 @@ function _renderClubDashboardMember(d, t, el, opts){
   // actor name. For dues_paid the actor IS the member; for pool_in the
   // actor is whoever paid; for expense the actor is the payer.
   var personalEvents = (d.recent || []).filter(function(ev){
-    // Membership-action audit rows are governance, not personal
-    // finance — keep them out of the member surface so it stays
-    // focused on the member's own money flow.
-    if(ev.kind === 'audit') return false;
+    // Governance audits stay out of the member surface — they're not
+    // personal finance. But transaction edit/delete audits ARE
+    // personally relevant when the target is me: we render them as a
+    // pip or a ghost row alongside the money flow.
+    if(ev.kind === 'audit'){
+      if((ev.action === 'transaction_edited' || ev.action === 'transaction_deleted')
+         && meName && ev.target_name === meName){
+        return true;
+      }
+      return false;
+    }
     if(meName && ev.actor === meName) return true;
     return false;
   });
+
+  // Build the edited-by-expense-id map for pip lookups, and convert
+  // deleted audits into ghost events. Edited audits are dropped from
+  // the list — they reappear as a pip on the financial row.
+  var memberEditedById = {};
+  personalEvents.forEach(function(ev){
+    if(ev.kind === 'audit' && ev.action === 'transaction_edited'){
+      var pl = ev.payload || {};
+      if(pl.expense_id) memberEditedById[pl.expense_id] = ev;
+    }
+  });
+  personalEvents = personalEvents
+    .filter(function(ev){
+      return !(ev.kind === 'audit' && ev.action === 'transaction_edited');
+    })
+    .map(function(ev){
+      if(ev.kind === 'audit' && ev.action === 'transaction_deleted'){
+        var p = ev.payload || {};
+        var ghostKind = (p.kind === 'expense')    ? 'expense'
+                      : (p.kind === 'prepayment') ? 'pool_in'
+                      : 'dues_paid';
+        return {
+          kind:        ghostKind,
+          amount:      Number(p.amount || 0),
+          description: p.description || '',
+          category:    p.category,
+          at:          ev.at,
+          _ghost:      true
+        };
+      }
+      return ev;
+    });
 
   // Pending claims this member submitted (dues payment + entry fee).
   // We surface them here as yellow rows so the member sees their own
@@ -3600,9 +3639,10 @@ function _renderClubDashboardMember(d, t, el, opts){
   var recentRows = '';
   mergedEvents.slice(0, 5).forEach(function(ev){
     var sign, color, lbl;
-    var rightAmount, statusBadge = '';
+    var statusBadge = '';
+    var isGhost = !!ev._ghost;
+    var editedAudit = (!isGhost && ev.ref) ? memberEditedById[ev.ref] : null;
     if(ev.kind === 'pending_claim'){
-      // Pending row — yellow amount + small "Pending" pill in title.
       var isEntry = ev.request_type === 'entry_fee_payment_claim';
       lbl = isEntry
         ? 'Payment for entry fee'
@@ -3624,18 +3664,44 @@ function _renderClubDashboardMember(d, t, el, opts){
       sign = '+'; color = '#30d158';
       lbl = 'Dues paid — ' + (ev.period_label || '');
     }
+    // Pip badges: red DELETED for ghosts, yellow EDITED when an audit
+    // entry matches this row's expense_id.
+    if(isGhost){
+      statusBadge =
+        '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+          'padding:1px 6px;border-radius:6px;background:rgba(255,69,58,0.18);'+
+          'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
+          'Deleted</span>';
+    } else if(editedAudit){
+      var ea = editedAudit.payload || {};
+      var oldA = ea.old_amount != null ? money(Number(ea.old_amount)) : '';
+      var newA = ea.new_amount != null ? money(Number(ea.new_amount)) : '';
+      var tip = (oldA && newA) ? 'Was '+oldA+', now '+newA : 'Edited';
+      statusBadge =
+        '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+          'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+          'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
+          'title="'+esc(tip)+'">Edited</span>';
+    }
     var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
       {month:'short', day:'numeric'}) : '';
     var subline = ev.kind === 'pending_claim'
       ? (when + ' · Waiting for admin approval')
       : (when || '');
+    var rowOpacity = isGhost ? '0.55' : '1';
+    var labelStyle = isGhost
+      ? 'font-size:13px;color:var(--c-text-2);text-decoration:line-through;'
+      : 'font-size:13px;color:var(--c-text);';
+    var amountStyle = 'font-size:14px;font-weight:700;color:'+color+
+      ';margin-left:10px;white-space:nowrap;' +
+      (isGhost ? 'text-decoration:line-through;' : '');
     recentRows +=
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--c-border);opacity:'+rowOpacity+';">'+
         '<div style="min-width:0;">'+
-          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+ statusBadge +'</div>'+
+          '<div style="'+labelStyle+'">'+esc(lbl)+ statusBadge +'</div>'+
           '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(subline)+'</div>'+
         '</div>'+
-        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+        '<div style="'+amountStyle+'">'+sign+money(ev.amount||0)+'</div>'+
       '</div>';
   });
   if(!recentRows){
@@ -5478,8 +5544,45 @@ function _renderClubDashboardAdmin(d, t, el, opts){
     '</div>';
 
   // ---- Recent activity (last 5 events; "View all" link wired later)
+  // Pre-process the feed so transaction edits/deletes from the audit
+  // log mirror the View All Activity treatment: edits become a pip on
+  // the financial row, deletes become a ghost (struck-through) row.
+  var recentEvents = d.recent || [];
+  var adminEditedById = {};
+  recentEvents.forEach(function(ev){
+    if(ev.kind === 'audit' && ev.action === 'transaction_edited'){
+      var pl = ev.payload || {};
+      if(pl.expense_id) adminEditedById[pl.expense_id] = ev;
+    }
+  });
+  // Drop transaction_edited audits (rendered as pips), and convert
+  // transaction_deleted audits into ghost financial events so they
+  // sit in the timeline where they happened.
+  var processedRecent = recentEvents
+    .filter(function(ev){
+      return !(ev.kind === 'audit' && ev.action === 'transaction_edited');
+    })
+    .map(function(ev){
+      if(ev.kind === 'audit' && ev.action === 'transaction_deleted'){
+        var p = ev.payload || {};
+        var ghostKind = (p.kind === 'expense')    ? 'expense'
+                      : (p.kind === 'prepayment') ? 'pool_in'
+                      : 'dues_paid';
+        return {
+          kind:        ghostKind,
+          amount:      Number(p.amount || 0),
+          description: p.description || '',
+          category:    p.category,
+          at:          ev.at,
+          actor:       ev.actor,
+          _ghost:      true
+        };
+      }
+      return ev;
+    });
+
   var recentRows = '';
-  (d.recent || []).slice(0, 5).forEach(function(ev){
+  processedRecent.slice(0, 5).forEach(function(ev){
     // Audit (membership-action) rows render with no dollar amount —
     // they're governance, not money. We surface them in this feed so
     // an admin scanning the dashboard sees "Ali added Mehmet" right
@@ -5529,23 +5632,47 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       {month:'short', day:'numeric'}) : '';
     // Any money row (expense or pool_in with positive amount) is
     // editable by an admin/treasurer; reversal prepayments (negative
-    // amount) and audit rows stay inert.
-    var rowEditable = (ev.kind === 'expense' || ev.kind === 'pool_in') &&
+    // amount), audit rows, and ghost rows stay inert.
+    var isGhost = !!ev._ghost;
+    var editedAudit = (!isGhost && ev.ref) ? adminEditedById[ev.ref] : null;
+    var rowEditable = !isGhost && (ev.kind === 'expense' || ev.kind === 'pool_in') &&
                       ev.ref && Number(ev.amount) > 0;
     var rowExtraAttrs = rowEditable
       ? ' data-edit-ev="'+esc(JSON.stringify(ev))+'"'
       : '';
+    // Pip badges: yellow EDITED on edited rows, red DELETED on ghosts.
+    var pip = '';
+    if(isGhost){
+      pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+            'padding:1px 6px;border-radius:6px;background:rgba(255,69,58,0.18);'+
+            'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
+            'Deleted</span>';
+    } else if(editedAudit){
+      var ea = editedAudit.payload || {};
+      var oldA = ea.old_amount != null ? money(Number(ea.old_amount)) : '';
+      var newA = ea.new_amount != null ? money(Number(ea.new_amount)) : '';
+      var tip = (oldA && newA) ? 'Was '+oldA+', now '+newA : 'Edited';
+      pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+            'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+            'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
+            'title="'+esc(tip)+'">Edited</span>';
+    }
+    var rowOpacity = isGhost ? '0.55' : '1';
+    var labelStyle = isGhost
+      ? 'font-size:13px;color:var(--c-text-2);text-decoration:line-through;'
+      : 'font-size:13px;color:var(--c-text);';
+    var amountStyle = 'font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;' +
+                      (isGhost ? 'text-decoration:line-through;' : '');
     recentRows +=
       '<div'+rowExtraAttrs+' style="display:flex;align-items:center;justify-content:space-between;'+
-        'padding:10px 0;border-top:1px solid var(--c-border);'+
+        'padding:10px 0;border-top:1px solid var(--c-border);opacity:'+rowOpacity+';'+
         (rowEditable ? 'cursor:pointer;' : '')+'">'+
         '<div style="min-width:0;">'+
-          '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+          '<div style="'+labelStyle+'">'+esc(lbl)+ pip +'</div>'+
           '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
             esc(ev.actor||'')+(when?' &middot; '+when:'')+'</div>'+
         '</div>'+
-        '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;'+
-              'white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+        '<div style="'+amountStyle+'">'+sign+money(ev.amount||0)+'</div>'+
       '</div>';
   });
   if(!recentRows){
