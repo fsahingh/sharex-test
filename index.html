@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.47">
+<meta name="app-version" content="V2-CLUB.48">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.47';
+var APP_VERSION = 'V2-CLUB.48';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3320,6 +3320,10 @@ function _renderClubDashboardMember(d, t, el, opts){
           // name on top, last name below. Falls back to initials if
           // we couldn't split a clean two-word name (e.g. global admin
           // viewing without a directory row, single-word display names).
+          // Mirrors the admin club ring's "tap to reset" affordance:
+          // when the user has selected a non-current month, the disc
+          // gets a blue border + a tiny "TAP TO RESET" caption so the
+          // affordance is discoverable.
           (function(){
             var first = '', last = '';
             if(opts.viewingName){
@@ -3334,20 +3338,33 @@ function _renderClubDashboardMember(d, t, el, opts){
               last  = (state.profile.last_name  || '').trim();
             }
             var hasTwoLines = !!(first && last);
-            // Font size shrinks with available space — the disc is
-            // discInset px from each edge, so its width = ringSize-2*discInset.
             var maxChars = Math.max((first||'').length, (last||'').length, 4);
             var nameFont = ringSize >= 240
               ? (maxChars > 8 ? 16 : 19)
               : (maxChars > 8 ? 14 : 17);
-            var inner = hasTwoLines
+            // "Current" here matches the ring renderer's default
+            // selection (memberSelected || d.current_period). The
+            // reset cue only shows when the user has clicked off the
+            // current month onto something else.
+            var memberIsCurrentSelected =
+              !state.memberSelectedMonth ||
+              state.memberSelectedMonth === d.current_period;
+            var nameBlock = hasTwoLines
               ? '<div style="font-size:'+nameFont+'px;font-weight:700;line-height:1.15;">'+esc(first)+'</div>'+
                 '<div style="font-size:'+nameFont+'px;font-weight:700;line-height:1.15;margin-top:2px;">'+esc(last)+'</div>'
               : '<div style="font-size:36px;font-weight:700;">'+esc(meInitials)+'</div>';
+            var resetHint = memberIsCurrentSelected
+              ? ''
+              : '<div style="font-size:9px;font-weight:700;color:var(--c-text-3);'+
+                  'text-transform:uppercase;letter-spacing:0.5px;margin-top:6px;">Tap to reset</div>';
+            var borderStyle = memberIsCurrentSelected
+              ? '1px solid var(--c-border)'
+              : '2px solid var(--c-tint)';
             return '<div data-mr-reset="1" style="position:absolute;inset:'+discInset+'px;border-radius:50%;background:var(--c-bg);'+
+              'border:'+borderStyle+';transition:.15s;'+
               'display:flex;flex-direction:column;align-items:center;justify-content:center;'+
               'color:var(--c-text);cursor:pointer;text-align:center;padding:6px;">'+
-              inner +
+              nameBlock + resetHint +
             '</div>';
           })()+
         '</div>'+
