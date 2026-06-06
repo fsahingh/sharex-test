@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.52">
+<meta name="app-version" content="V2-CLUB.53">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.52';
+var APP_VERSION = 'V2-CLUB.53';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3579,7 +3579,7 @@ function _renderClubDashboardMember(d, t, el, opts){
   personalEvents.forEach(function(ev){
     if(ev.kind === 'audit' && ev.action === 'transaction_edited'){
       var pl = ev.payload || {};
-      if(pl.expense_id) memberEditedById[pl.expense_id] = ev;
+      if(pl.expense_id){ var ex=memberEditedById[pl.expense_id]; if(!ex || new Date(ev.at).getTime()>new Date(ex.at).getTime()) memberEditedById[pl.expense_id]=ev; }
     }
   });
   personalEvents = personalEvents
@@ -4736,7 +4736,7 @@ async function openMyYearActivityModal(){
     var deletedGhosts = [];
     audit.forEach(function(a){
       if(a.action === 'transaction_edited' && a.expense_id){
-        editedById[a.expense_id] = a;
+        (function(){ var ex=editedById[a.expense_id]; if(!ex || new Date(a.at).getTime()>new Date(ex.at).getTime()) editedById[a.expense_id]=a; })();
       } else if(a.action === 'transaction_deleted'){
         deletedGhosts.push(a);
       }
@@ -4929,7 +4929,7 @@ function _renderClubActivityList(items){
   items.forEach(function(ev){
     if(ev.kind === 'audit' && ev.action === 'transaction_edited'){
       var pl = ev.payload || {};
-      if(pl.expense_id) editedById[pl.expense_id] = ev;
+      if(pl.expense_id){ var ex=editedById[pl.expense_id]; if(!ex || new Date(ev.at).getTime()>new Date(ex.at).getTime()) editedById[pl.expense_id]=ev; }
     }
   });
   items = items
@@ -5540,10 +5540,10 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('Over Dues '+esc((d.year||'')+''),
                money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
                { hint:'collected of billed' }) +
-      _statRow('IN ('+esc(selected && selected.label_short || '')+')',
-               '+'+money(monthIn), { color:'#30d158' }) +
-      _statRow('OUT ('+esc(selected && selected.label_short || '')+')',
-               '-'+money(monthOut), { color:'#ff453a' }) +
+      _statRow('Pool In ('+esc(selected && selected.label_short || '')+')',
+               '+'+money(monthIn), { color:'#30d158', hint:'from pool' }) +
+      _statRow('Pool Out ('+esc(selected && selected.label_short || '')+')',
+               '-'+money(monthOut), { color:'#ff453a', hint:'spent from pool' }) +
       '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;'+
             'display:flex;align-items:center;justify-content:flex-end;gap:8px;">'+
         '<span><strong style="color:var(--c-text);">Selected:</strong> '+esc(selectedLabel)+
@@ -5606,7 +5606,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   recentEvents.forEach(function(ev){
     if(ev.kind === 'audit' && ev.action === 'transaction_edited'){
       var pl = ev.payload || {};
-      if(pl.expense_id) adminEditedById[pl.expense_id] = ev;
+      if(pl.expense_id){ var ex=adminEditedById[pl.expense_id]; if(!ex || new Date(ev.at).getTime()>new Date(ex.at).getTime()) adminEditedById[pl.expense_id]=ev; }
     }
   });
   // Drop transaction_edited audits (rendered as pips), and convert
