@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.46">
+<meta name="app-version" content="V2-CLUB.47">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.46';
+var APP_VERSION = 'V2-CLUB.47';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3351,20 +3351,16 @@ function _renderClubDashboardMember(d, t, el, opts){
             '</div>';
           })()+
         '</div>'+
-        // Right — personal read-outs
-        '<div style="min-width:0;display:flex;flex-direction:column;gap:14px;">'+
+        // Right — personal read-outs, right-aligned to the card edge.
+        '<div style="min-width:0;display:flex;flex-direction:column;gap:14px;text-align:right;align-items:flex-end;">'+
           contributionCard +
-          '<div>'+
-            '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">This month</div>'+
-            '<div style="font-size:14px;color:var(--c-text);margin-top:2px;">'+esc(d.current_period_label||'')+'</div>'+
-          '</div>'+
+          // Dynamic "This month" / "Selected month" block. Replaces
+          // both the static current-month line and the ring-bottom
+          // info row — one place for "what does the highlighted
+          // segment mean?" Renders empty if no month resolves.
+          _renderMemberSelectedMonthBlock(displayMonths, memberSelected, d.current_period) +
         '</div>'+
       '</div>'+
-      // Inline info banner for the selected month. Sits between the
-      // ring + info column and the legend so the connection to the
-      // ring is visible. When nothing is selected this row is hidden
-      // (CSS) to avoid taking permanent space.
-      _renderMemberRingInfoRow(displayMonths, memberSelected, d.current_period) +
       // Legend below the hero — tiny and unobtrusive.
       '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
             'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
@@ -3847,6 +3843,89 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
          (label ? '<title>'+esc(label)+'</title>' : '') +
          '</path>';
 }
+// Right-column "This month" / "Selected month" block. Replaces the
+// older static "This month / Jun 2026" pair AND the ring-bottom info
+// row. One spot, right-aligned, tells the user what month they're
+// looking at and what's true about it.
+//
+// Header:
+//   - "THIS MONTH"     when the selected segment is the current period
+//   - "SELECTED MONTH" otherwise
+// Month line: full month + year, e.g. "June 2026" (long format).
+// Status line: same future-aware copy used by the old info row.
+function _renderMemberSelectedMonthBlock(months, selectedPeriod, currentPeriod){
+  // Default selection = current period (matches the ring renderer).
+  var period = selectedPeriod || currentPeriod;
+  if(!period) return '';
+  var m = (months || []).filter(function(x){ return x.period === period; })[0];
+  if(!m) return '';
+  var isCurrent = !!(currentPeriod && period === currentPeriod);
+  var isFuture  = !!(currentPeriod && period > currentPeriod);
+  var amt   = Number(m.amount || 0);
+  var paid  = Number(m.paid_amount || 0);
+  // Long month/year (e.g. "June 2026"). We render in UTC so the day-
+  // boundary cast doesn't shift into a different month.
+  var monthLong = '';
+  try{
+    monthLong = (new Date(period + 'T00:00:00Z')).toLocaleString(undefined,
+      { month:'long', year:'numeric', timeZone:'UTC' });
+  }catch(err){
+    monthLong = m.label || period;
+  }
+  // Status copy + colour.
+  var statusColor, statusText, statusExtra = '';
+  if(m.status === 'paid'){
+    statusColor = '#30d158';
+    if(isFuture){
+      statusText = 'Paid in full ahead of schedule';
+      statusExtra = 'Thank you!';
+    } else {
+      statusText = 'Paid '+money(paid || amt);
+    }
+  } else if(isFuture){
+    statusColor = 'var(--c-text-3)';
+    if(paid > 0){
+      statusText = 'Thank you for your prepayment';
+      statusExtra = money(amt - paid)+' upcoming for this month.';
+    } else {
+      statusText = 'Upcoming '+money(amt);
+      statusExtra = 'Payable during the month.';
+    }
+  } else if(m.status === 'partial'){
+    statusColor = '#ff9f0a';
+    statusText = money(paid)+' of '+money(amt);
+    statusExtra = money(amt - paid)+' left';
+  } else if(m.status === 'current'){
+    statusColor = '#0a84ff';
+    statusText = money(amt)+' due';
+  } else if(m.status === 'unpaid'){
+    statusColor = '#ff453a';
+    statusText = money(amt)+' owed';
+  } else if(m.status === 'future'){
+    statusColor = 'var(--c-text-3)';
+    statusText = paid > 0
+      ? 'Thank you for your prepayment'
+      : 'Upcoming '+money(amt);
+    statusExtra = paid > 0 ? money(amt - paid)+' upcoming.' : '';
+  } else {
+    statusColor = 'var(--c-text-3)';
+    statusText = 'Not a member';
+  }
+  return '<div>'+
+    '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.5px;">'+
+      (isCurrent ? 'This month' : 'Selected month')+
+    '</div>'+
+    '<div style="font-size:14px;font-weight:600;color:var(--c-text);margin-top:2px;">'+
+      esc(monthLong)+'</div>'+
+    '<div style="font-size:13px;font-weight:700;margin-top:6px;color:'+statusColor+';">'+
+      esc(statusText)+'</div>'+
+    (statusExtra
+      ? '<div style="font-size:12px;color:var(--c-text-2);margin-top:1px;">'+esc(statusExtra)+'</div>'
+      : '') +
+  '</div>';
+}
+
 // Inline info row shown beneath the member ring when a month segment
 // is selected. Styled to match the right-column readouts (uppercase
 // label + value) so it reads as a continuation of the hero card.
@@ -4277,18 +4356,39 @@ function _wireManageUnpaidRows(){
 }
 
 
-// Common refresh after a manage-unpaid action (admin mark paid, etc.).
-// Invalidates the dashboard cache and re-renders the current surface.
-function _refreshAfterUnpaidAction(){
+// =====================================================================
+//  UNIFIED FULL REFRESH
+// =====================================================================
+// Called after any action that changes finances or membership (admin
+// approve / reject, edit transaction, mark paid, member claim submit,
+// etc.). Drops every cache key the trip surface reads from and
+// re-renders the active view so numbers, recent activity, bell badges
+// and modals all reflect the new state in one pass.
+async function _fullRefresh(){
+  // Cache invalidation for every trip-scoped surface.
   state.clubDashboardLoadedFor = null;
   state.clubLedgerLoadedFor    = null;
   state.clubMembersLoadedFor   = null;
+  state.expensesLoadedFor      = null;
+  state.settlementLoadedFor    = null;
+  state.memberSpentCache       = {};
+  // Re-pull the bell state in parallel with the surface re-render so
+  // the bell badge reflects the new world after the action lands.
+  var notifsPromise;
+  try{ notifsPromise = refreshNotifs(); }catch(err){ notifsPromise = Promise.resolve(); }
   if(state.viewingMember && state.viewingMember.directory_id){
-    openMemberProfileView(state.viewingMember.directory_id);
+    try{ await openMemberProfileView(state.viewingMember.directory_id); }catch(e){}
   } else {
-    renderActiveTab();
+    try{ await renderActiveTab(); }catch(e){}
   }
+  try{ await notifsPromise; }catch(e){}
+  // Notif body uses state.notifs / state.memberRequests directly;
+  // re-render it explicitly so a bell that's open updates too.
+  try{ renderNotifs(); }catch(e){}
 }
+
+// Back-compat alias — anything still calling the old name routes here.
+function _refreshAfterUnpaidAction(){ _fullRefresh(); }
 
 // ============================================================
 //  MEMBER ACTIONS — chooser + See Members + View Activity +
@@ -5093,9 +5193,7 @@ async function submitMyDuesClaim(){
       if(pres.error) throw pres.error;
       closeModal('modal-dues-claim');
       toast('Prepayment submitted — your admin will review it');
-      state.clubDashboardLoadedFor = null;
-      await refreshNotifs();
-      renderClubDashboardTab();
+      await _fullRefresh();
     }catch(err){
       setMsg(err.message || 'Could not submit.');
     }
@@ -5121,11 +5219,7 @@ async function submitMyDuesClaim(){
     if(res.error) throw res.error;
     closeModal('modal-dues-claim');
     toast('Claim submitted — your admin will review it');
-    // Refresh both the dashboard and the bell-state so the new pending
-    // claim shows up immediately in Recent Activity.
-    state.clubDashboardLoadedFor = null;
-    await refreshNotifs();
-    renderClubDashboardTab();
+    await _fullRefresh();
   }catch(err){
     setMsg(err.message || 'Could not submit.');
   }
@@ -6346,16 +6440,10 @@ async function doDeleteEditTransaction(){
   }
 }
 
-function _afterEditTxRefresh(){
-  state.clubDashboardLoadedFor = null;
-  state.clubLedgerLoadedFor    = null;
-  state.clubMembersLoadedFor   = null;
-  if(state.viewingMember && state.viewingMember.directory_id){
-    openMemberProfileView(state.viewingMember.directory_id);
-  } else {
-    renderActiveTab();
-  }
-}
+// Edit-transaction post-action refresh — same unified path everything
+// else uses. Kept as a separate name only because other callers refer
+// to it by symbol.
+function _afterEditTxRefresh(){ _fullRefresh(); }
 
 // Wires every editable activity row inside a container. Activity rows
 // flagged with data-edit-ref carry the activity event payload as JSON
@@ -6521,19 +6609,7 @@ async function submitMarkDuesPaid(){
     if(res.error) throw res.error;
     closeModal('modal-mark-dues');
     toast('Dues marked paid');
-    // Invalidate caches so the dashboard, ledger, and members tab all
-    // pick up the new status on next render.
-    state.clubLedgerLoadedFor = null;
-    state.clubMembersLoadedFor = null;
-    state.clubDashboardLoadedFor = null;
-    // If the admin marked dues paid while viewing another member's
-    // profile, the target's payload needs a fresh fetch — the ring,
-    // status card, and unpaid list all depend on the new state.
-    if(state.viewingMember && state.viewingMember.directory_id){
-      openMemberProfileView(state.viewingMember.directory_id);
-    } else {
-      renderActiveTab();
-    }
+    await _fullRefresh();
   }catch(err){
     setMsg(err.message || 'Could not save.');
   }
@@ -7110,11 +7186,7 @@ async function submitClubExpense(){
     }
     closeModal('modal-club-expense');
     toast(toastMsg);
-    // Invalidate the club caches so dashboards & feeds refresh.
-    state.clubDashboardLoadedFor = null;
-    state.clubLedgerLoadedFor = null;
-    state.clubMembersLoadedFor = null;
-    renderActiveTab();
+    await _fullRefresh();
   }catch(err){
     setMsg(err.message || 'Could not add expense.');
   }
@@ -7190,11 +7262,7 @@ async function submitPoolIn(){
     if(res.error) throw res.error;
     closeModal('modal-pool-in');
     toast('Recorded');
-    // Invalidate all club caches so dashboard, ledger, members refresh.
-    state.clubLedgerLoadedFor = null;
-    state.clubMembersLoadedFor = null;
-    state.clubDashboardLoadedFor = null;
-    renderActiveTab();
+    await _fullRefresh();
   }catch(err){
     setMsg(err.message || 'Could not save.');
   }
@@ -10476,14 +10544,14 @@ async function doApproveMemberRequest(id){
     if(res.error) throw res.error;
     toast('Approved');
     closeModal('modal-notif');
-    // If I'm currently viewing the trip this request relates to, refresh
-    // the whole trip — my membership/admin status may have changed.
+    // Same trip? Refresh everything. Different trip? At least refresh
+    // notifs so the bell shows the resolved state.
     if(req && state.trip && state.trip.trip_id === req.trip_id){
-      state.expensesLoadedFor = null;
-      state.settlementLoadedFor = null;
-      await reloadTrip();
+      await _fullRefresh();
+    } else {
+      await refreshNotifs();
+      renderNotifs();
     }
-    await refreshNotifs();
   }catch(err){
     toast(err.message || 'Could not approve', true);
   }
@@ -10625,8 +10693,7 @@ async function submitReject(){
     state.rejectingRequestId = null;
     state.rejectingMemberRequestId = null;
     toast('Rejected');
-    await refreshNotifs();
-    renderNotifs();
+    await _fullRefresh();
   }catch(err){
     $('rj-msg').className = 'msg show err';
     $('rj-msg').textContent = err.message || 'Could not reject.';
