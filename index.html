@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.49">
+<meta name="app-version" content="V2-CLUB.50">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.49';
+var APP_VERSION = 'V2-CLUB.50';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4635,28 +4635,83 @@ async function openMyYearActivityModal(){
   openModal('modal-my-activity');
   $('mya-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
   try{
-    var res;
+    var feedPromise, auditPromise;
     if(state.viewingMember && state.viewingMember.directory_id){
-      // Admin viewing another member — fetch that member's feed.
-      res = await sb.rpc('get_member_year_activity', {
+      // Admin viewing another member — both feed and audit overlay
+      // filter to the same target.
+      feedPromise = sb.rpc('get_member_year_activity', {
+        p_trip: state.trip.trip_id,
+        p_dir:  state.viewingMember.directory_id
+      });
+      auditPromise = sb.rpc('get_my_activity_audit', {
         p_trip: state.trip.trip_id,
         p_dir:  state.viewingMember.directory_id
       });
     } else {
-      // Own profile — keep the original (caller-scoped) RPC.
-      res = await sb.rpc('get_my_year_activity', { p_trip: state.trip.trip_id });
+      feedPromise  = sb.rpc('get_my_year_activity',  { p_trip: state.trip.trip_id });
+      auditPromise = sb.rpc('get_my_activity_audit', { p_trip: state.trip.trip_id, p_dir: null });
     }
-    if(res.error) throw res.error;
-    var items = res.data || [];
-    if(items.length === 0){
+    // Run feed and audit overlay in parallel.
+    var feedRes = await feedPromise;
+    if(feedRes.error) throw feedRes.error;
+    var feedItems = feedRes.data || [];
+    var audit = [];
+    try{
+      var auditRes = await auditPromise;
+      if(!auditRes.error) audit = auditRes.data || [];
+    }catch(err){
+      // Audit overlay is best-effort — if the RPC isn't deployed yet
+      // we just render the feed without edit/delete markers.
+    }
+
+    // Build maps: edited audits by expense_id (for in-place pip);
+    // deleted audits become ghost entries we merge into the feed.
+    var editedById = {};
+    var deletedGhosts = [];
+    audit.forEach(function(a){
+      if(a.action === 'transaction_edited' && a.expense_id){
+        editedById[a.expense_id] = a;
+      } else if(a.action === 'transaction_deleted'){
+        deletedGhosts.push(a);
+      }
+    });
+
+    // Convert ghosts into feed-shaped events so the renderer treats
+    // them uniformly.
+    var ghostEvents = deletedGhosts.map(function(a){
+      var kind = (a.kind === 'expense') ? 'expense'
+               : (a.kind === 'prepayment') ? 'pool_in'
+               : 'dues_paid';
+      return {
+        kind: kind,
+        amount: Number(a.amount || 0),
+        description: a.description || '',
+        at: a.at,
+        _ghost: true,
+        _audit: a
+      };
+    });
+
+    // Merge + sort by date descending. Use the audit's `at` for ghosts.
+    var allItems = feedItems.concat(ghostEvents).sort(function(x, y){
+      var tx = x.at ? new Date(x.at).getTime() : 0;
+      var ty = y.at ? new Date(y.at).getTime() : 0;
+      return ty - tx;
+    });
+
+    if(allItems.length === 0){
       $('mya-body').innerHTML =
         '<div class="empty"><div class="empty-title">No activity yet</div>'+
         '<div class="empty-sub">Your personal events for this year will show up here.</div></div>';
       return;
     }
+
     var html = '';
-    items.forEach(function(ev){
+    allItems.forEach(function(ev){
       var sign, color, lbl;
+      var isGhost = !!ev._ghost;
+      var editedAudit = (!isGhost && ev.id) ? editedById[ev.id] : null;
+
       if(ev.kind === 'expense'){
         sign = '-'; color = '#ff453a';
         lbl = ev.description || 'Expense';
@@ -4667,15 +4722,41 @@ async function openMyYearActivityModal(){
         sign = '+'; color = '#30d158';
         lbl = 'Dues paid' + (ev.period_label ? ' — ' + ev.period_label : '');
       }
+
+      // Pip badges sit next to the label — small, uppercase, coloured.
+      var pip = '';
+      if(isGhost){
+        pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+              'padding:1px 6px;border-radius:6px;background:rgba(255,69,58,0.18);'+
+              'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
+              'Deleted</span>';
+      } else if(editedAudit){
+        pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+              'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+              'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
+              'title="Was '+money(Number(editedAudit.old_amount||0))+
+              ', now '+money(Number(editedAudit.new_amount||0))+'">'+
+              'Edited</span>';
+      }
+
       var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
         {month:'short', day:'numeric', year:'numeric'}) : '';
+      // Ghost rows: muted opacity + strike-through label so they read
+      // as historical rather than current. The amount keeps its sign
+      // so the impact direction stays legible.
+      var rowOpacity = isGhost ? '0.55' : '1';
+      var labelStyle = isGhost
+        ? 'font-size:13px;color:var(--c-text-2);text-decoration:line-through;'
+        : 'font-size:13px;color:var(--c-text);';
+
       html +=
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:0.5px solid var(--c-border);">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:0.5px solid var(--c-border);opacity:'+rowOpacity+';">'+
           '<div style="min-width:0;flex:1;">'+
-            '<div style="font-size:13px;color:var(--c-text);">'+esc(lbl)+'</div>'+
+            '<div style="'+labelStyle+'">'+esc(lbl)+ pip +'</div>'+
             '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(when)+'</div>'+
           '</div>'+
-          '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;">'+sign+money(ev.amount||0)+'</div>'+
+          '<div style="font-size:14px;font-weight:700;color:'+color+';margin-left:10px;white-space:nowrap;'+
+            (isGhost ? 'text-decoration:line-through;' : '')+'">'+sign+money(ev.amount||0)+'</div>'+
         '</div>';
     });
     $('mya-body').innerHTML = html;
