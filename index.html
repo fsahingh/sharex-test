@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.53">
+<meta name="app-version" content="V2-CLUB.54">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1908,7 +1908,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.53';
+var APP_VERSION = 'V2-CLUB.54';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3673,15 +3673,7 @@ function _renderClubDashboardMember(d, t, el, opts){
           'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
           'Deleted</span>';
     } else if(editedAudit){
-      var ea = editedAudit.payload || {};
-      var oldA = ea.old_amount != null ? money(Number(ea.old_amount)) : '';
-      var newA = ea.new_amount != null ? money(Number(ea.new_amount)) : '';
-      var tip = (oldA && newA) ? 'Was '+oldA+', now '+newA : 'Edited';
-      statusBadge =
-        '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-          'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
-          'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
-          'title="'+esc(tip)+'">Edited</span>';
+      statusBadge = _renderEditedPip(editedAudit);
     }
     var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
       {month:'short', day:'numeric'}) : '';
@@ -4797,12 +4789,7 @@ async function openMyYearActivityModal(){
               'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
               'Deleted</span>';
       } else if(editedAudit){
-        pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-              'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
-              'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
-              'title="Was '+money(Number(editedAudit.old_amount||0))+
-              ', now '+money(Number(editedAudit.new_amount||0))+'">'+
-              'Edited</span>';
+        pip = _renderEditedPip(editedAudit);
       }
 
       var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
@@ -5056,14 +5043,7 @@ function _activityRowHtml(ev, editedById){
           'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
           'Deleted</span>';
   } else if(editedAudit){
-    var ea = editedAudit.payload || {};
-    var oldA = ea.old_amount != null ? money(Number(ea.old_amount)) : '';
-    var newA = ea.new_amount != null ? money(Number(ea.new_amount)) : '';
-    var tip = (oldA && newA) ? 'Was '+oldA+', now '+newA : 'Edited';
-    pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-          'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
-          'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
-          'title="'+esc(tip)+'">Edited</span>';
+    pip = _renderEditedPip(editedAudit);
   }
   var editable = !isGhost && (ev.kind === 'expense' || ev.kind === 'pool_in') &&
                  ev.ref && (ev.amount === undefined || Number(ev.amount) > 0);
@@ -5180,6 +5160,30 @@ function _auditLabel(ev){
 // admin still sees "Cash" / "Zelle" / etc. in the bell. "Other"
 // reveals a short text input for anything bespoke. Default = Cash
 // because that's the most common case in the user's testing.
+
+// Renders the inline "Edited" pip + a visible "$old → $new" delta.
+// Mobile-friendly (no tooltip required to see what changed). Handles
+// both audit shapes the frontend sees:
+//   - d.recent audit rows (admin Recent Activity feed): nested in
+//     `payload` (e.g. audit.payload.old_amount)
+//   - get_my_activity_audit rows (View All Activity overlay): the
+//     RPC already flattens the fields onto the row itself.
+function _renderEditedPip(audit){
+  if(!audit) return '';
+  var p = audit.payload || audit;   // flat row OR nested payload
+  var oldA = (p.old_amount != null) ? money(Number(p.old_amount)) : '';
+  var newA = (p.new_amount != null) ? money(Number(p.new_amount)) : '';
+  var pip =
+    '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+      'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+      'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
+      'Edited</span>';
+  var delta = (oldA && newA && oldA !== newA)
+    ? '<span style="font-size:11px;color:var(--c-text-3);margin-left:6px;white-space:nowrap;">'+
+        oldA+' → '+newA+'</span>'
+    : '';
+  return pip + delta;
+}
 function _renderPaymentMethodPicker(){
   var methods = [
     { val:'cash',   label:'Cash'   },
@@ -5711,14 +5715,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
             'color:#ff453a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
             'Deleted</span>';
     } else if(editedAudit){
-      var ea = editedAudit.payload || {};
-      var oldA = ea.old_amount != null ? money(Number(ea.old_amount)) : '';
-      var newA = ea.new_amount != null ? money(Number(ea.new_amount)) : '';
-      var tip = (oldA && newA) ? 'Was '+oldA+', now '+newA : 'Edited';
-      pip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-            'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
-            'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;" '+
-            'title="'+esc(tip)+'">Edited</span>';
+      pip = _renderEditedPip(editedAudit);
     }
     var rowOpacity = isGhost ? '0.55' : '1';
     var labelStyle = isGhost
