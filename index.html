@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.64">
+<meta name="app-version" content="V2-CLUB.65">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.64';
+var APP_VERSION = 'V2-CLUB.65';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -11321,10 +11321,20 @@ function renderNotifs(){
     if(isResolved && (r.initiated_by_me || r.i_am_target)){
       h += '<button class="btn btn-cancel" data-mr-dismiss="'+r.id+'">Dismiss</button>';
     }else if(r.i_can_decide){
+      // Reimbursement requests get a Mark Reimbursed button that opens
+      // the modal (with cash + optional dues offset). Other request
+      // types keep the direct Approve / Reject pair — they don't have
+      // a "how to settle" decision to make. Reject stays for all of
+      // them so admin can decline with a reason.
       h += '<button class="btn btn-reject" data-mr-reject="'+r.id+'">'+
-        (isMakeAdmin?'Decline':'Reject')+'</button>'+
-        '<button class="btn btn-approve" data-mr-approve="'+r.id+'">'+
-        (isMakeAdmin?'Accept':'Approve')+'</button>';
+        (isMakeAdmin?'Decline':'Reject')+'</button>';
+      if(isReimburse){
+        h += '<button class="btn btn-approve" data-mr-open-reimburse="'+r.id+'">'+
+          'Mark Reimbursed</button>';
+      } else {
+        h += '<button class="btn btn-approve" data-mr-approve="'+r.id+'">'+
+          (isMakeAdmin?'Accept':'Approve')+'</button>';
+      }
     }else if(r.initiated_by_me){
       h += '<button class="btn btn-cancel" data-mr-cancel="'+r.id+'">Cancel</button>';
     }
