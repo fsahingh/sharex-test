@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.56">
+<meta name="app-version" content="V2-CLUB.57">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.56';
+var APP_VERSION = 'V2-CLUB.57';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4346,20 +4346,28 @@ function _applyMemberNetBalanceToDom(nb){
     if(net > 0.005){
       valOOP.textContent = money(net);
       rowOOP.hidden = false;
-      rowOOP.onclick = openMemberOutOfPocketModal;
+      // Both OOP and POW rows live inside #member-contrib-card which
+      // has its own click handler (opens Contribution & Spending).
+      // Stop propagation so clicking these inner affordances opens
+      // ONLY the relevant modal.
+      rowOOP.onclick = function(e){
+        if(e && e.stopPropagation) e.stopPropagation();
+        openMemberOutOfPocketModal();
+      };
     } else {
       rowOOP.hidden = true;
     }
   }
-  // Pool-owes-you mirrors net_out_of_pocket — same number, green
-  // affordance with the Request Reimbursement entry point.
   var rowPow = document.getElementById('member-pow-row');
   var valPow = document.getElementById('member-pow-value');
   if(rowPow && valPow){
     if(net > 0.005){
       valPow.textContent = money(net);
       rowPow.hidden = false;
-      rowPow.onclick = openRequestReimbursementModal;
+      rowPow.onclick = function(e){
+        if(e && e.stopPropagation) e.stopPropagation();
+        openRequestReimbursementModal();
+      };
     } else {
       rowPow.hidden = true;
     }
