@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.55">
+<meta name="app-version" content="V2-CLUB.56">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.55';
+var APP_VERSION = 'V2-CLUB.56';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5498,7 +5498,11 @@ async function openPoolOwesMembersModal(){
             '<div style="font-size:14px;font-weight:700;color:var(--c-text);">'+esc(m.display_name||'')+'</div>'+
             '<div style="font-size:12px;color:#ff9f0a;font-weight:700;margin-top:2px;">'+money(m.net_owed)+' owed</div>'+
           '</div>'+
-          '<button class="btn btn-primary" style="padding:7px 14px;font-size:12.5px;" '+
+          // Override .btn default width:100% so the button hugs its
+          // content. flex-shrink:0 keeps it from squeezing on narrow
+          // screens; white-space:nowrap keeps the label on one line.
+          '<button class="btn btn-primary" style="width:auto;flex-shrink:0;min-height:auto;'+
+            'padding:8px 14px;font-size:12.5px;white-space:nowrap;" '+
             'data-po-dir="'+esc(m.directory_id)+'" data-po-name="'+esc(m.display_name||'')+'" '+
             'data-po-net="'+esc(String(m.net_owed))+'">Mark reimbursed</button>'+
         '</div>';
