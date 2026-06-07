@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.62">
+<meta name="app-version" content="V2-CLUB.63">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.62';
+var APP_VERSION = 'V2-CLUB.63';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -11414,13 +11414,25 @@ function renderNotifs(){
     var md = ev.target.closest('[data-mr-dismiss]');
     if(md){ doDismissMemberRequest(md.dataset.mrDismiss); return; }
     // Reimbursement request card — tap anywhere outside the explicit
-    // Approve / Reject buttons opens the Pool Owes Members modal so
-    // the admin can review the full picture before deciding (e.g.
-    // applying a partial dues offset instead of straight cash).
+    // Approve / Reject buttons opens the Mark Reimbursed modal
+    // directly, pre-filled with the requesting member and the
+    // requested amount. Skips the Pool Owes Members detour, which
+    // can be empty if the member's running net is already zero.
     var ropen = ev.target.closest('[data-mr-open-reimburse]');
     if(ropen){
-      closeModal('modal-notif');
-      openPoolOwesMembersModal();
+      var reqId = ropen.dataset.mrOpenReimburse;
+      var req = (state.memberRequests || []).find(function(r){
+        return r.id === reqId;
+      });
+      if(req){
+        closeModal('modal-notif');
+        openMarkReimbursedModal({
+          dir:    req.target_directory_id,
+          name:   req.target_name || req.initiator_name || 'Member',
+          net:    Number(req.requested_amount || 0),
+          reqId:  req.id
+        });
+      }
       return;
     }
     // Expense change requests
