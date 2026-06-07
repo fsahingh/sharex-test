@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.60">
+<meta name="app-version" content="V2-CLUB.61">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.60';
+var APP_VERSION = 'V2-CLUB.61';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2239,7 +2239,23 @@ function overlay(label){
 function overlayOff(){
   if(overlayEl){ overlayEl.remove(); overlayEl=null; }
 }
-function openModal(id){ show(id); document.body.style.overflow='hidden'; }
+function openModal(id){
+  show(id);
+  document.body.style.overflow='hidden';
+  // Auto-wire backdrop tap to close. Many modals had this wired
+  // ad-hoc, others didn't — centralising it here means every modal
+  // dismisses on outside tap consistently. We attach the handler
+  // once per modal and idempotently (the data-bd-wired flag).
+  var el = document.getElementById(id);
+  if(el && !el.dataset.bdWired){
+    var bd = el.querySelector('.modal-backdrop');
+    if(bd){
+      bd.style.cursor = 'pointer';
+      bd.addEventListener('click', function(){ closeModal(id); });
+      el.dataset.bdWired = '1';
+    }
+  }
+}
 function closeModal(id){ hide(id); document.body.style.overflow=''; }
 
 // Make every modal handle act as a "drag down to dismiss" affordance.
