@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.58">
+<meta name="app-version" content="V2-CLUB.59">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.58';
+var APP_VERSION = 'V2-CLUB.59';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3370,14 +3370,17 @@ function _renderClubDashboardMember(d, t, el, opts){
 
   // "See members" button — pinned to the top-right corner of the hero
   // card. Same accent treatment as the FAB so the two member actions
-  // feel like a set. Hidden in the admin's "My Profile" preview because
-  // the chip bar above already exposes the same action.
+  // See-Members affordance. Rendered inline beside the legend row
+  // (no more absolute positioning, which used to overlap the
+  // "Contributed in YYYY" label on narrower viewports). Hidden in
+  // the admin's "My Profile" preview because the chip bar above
+  // already exposes the same action.
   var seeMembersBtn = opts.hideSeeMembersBtn ? '' :
     '<button id="md-see-members" type="button" '+
-      'style="position:absolute;top:14px;right:14px;display:inline-flex;'+
-      'align-items:center;gap:6px;padding:7px 11px;border-radius:999px;'+
-      'background:var(--c-bg);color:var(--c-text-2);border:1px solid var(--c-border);'+
-      'font-size:11.5px;font-weight:600;cursor:pointer;z-index:2;">'+
+      'style="display:inline-flex;align-items:center;gap:6px;padding:6px 11px;'+
+      'border-radius:999px;background:var(--c-bg);color:var(--c-text-2);'+
+      'border:1px solid var(--c-border);font-size:11.5px;font-weight:600;'+
+      'cursor:pointer;flex-shrink:0;white-space:nowrap;">'+
       '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'+
       '<span>See members</span>'+
     '</button>';
@@ -3434,7 +3437,6 @@ function _renderClubDashboardMember(d, t, el, opts){
   var heroCard =
     '<div class="club-hero-card" style="position:relative;background:var(--c-card);border-radius:var(--r);padding:18px;margin-bottom:14px;">'+
       (opts.chipBarHtml || '') +
-      seeMembersBtn +
       '<div style="display:grid;grid-template-columns:'+ringSize+'px 1fr;gap:14px;align-items:center;">'+
         // Left — avatar + ring
         '<div style="position:relative;width:'+ringSize+'px;height:'+ringSize+'px;flex-shrink:0;">'+
@@ -3501,14 +3503,21 @@ function _renderClubDashboardMember(d, t, el, opts){
           _renderMemberSelectedMonthBlock(displayMonths, memberSelected, d.current_period) +
         '</div>'+
       '</div>'+
-      // Legend below the hero — tiny and unobtrusive.
-      '<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--c-text-3);'+
-            'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);justify-content:center;">'+
-        _ringLegendItem('#30d158', 'Paid')+
-        _ringLegendItem('#ff9f0a', 'Partial')+
-        _ringLegendItem('#0a84ff', 'Current')+
-        _ringLegendItem('#ff453a', 'Overdue')+
-        _ringLegendItem('#3a3a3c', 'Not member', true)+
+      // Legend row + See Members button sit on a single line: legend
+      // items hug the centre, button sticks to the right. flex-wrap
+      // lets the legend reflow on narrow screens without pushing the
+      // button onto its own row.
+      '<div style="display:flex;align-items:center;gap:10px;'+
+            'margin-top:14px;padding-top:14px;border-top:1px solid var(--c-border);">'+
+        '<div style="flex:1;display:flex;flex-wrap:wrap;gap:10px;font-size:11px;'+
+              'color:var(--c-text-3);justify-content:center;">'+
+          _ringLegendItem('#30d158', 'Paid')+
+          _ringLegendItem('#ff9f0a', 'Partial')+
+          _ringLegendItem('#0a84ff', 'Current')+
+          _ringLegendItem('#ff453a', 'Overdue')+
+          _ringLegendItem('#3a3a3c', 'Not member', true)+
+        '</div>'+
+        seeMembersBtn +
       '</div>'+
     '</div>';
 
