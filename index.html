@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.54">
+<meta name="app-version" content="V2-CLUB.55">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -1150,6 +1150,120 @@
   </div>
 </div>
 
+<!-- ======================= REIMBURSEMENT MODALS ========================= -->
+
+<!-- Member-side breakdown: spent, reimbursed, net + per-expense list -->
+<div class="modal" id="modal-out-of-pocket" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:80vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Out of pocket</div>
+    <div class="modal-body" id="oop-body" style="overflow-y:auto;min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="oop-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Member-side: submit a reimbursement request -->
+<div class="modal" id="modal-request-reimburse" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Request reimbursement</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--c-text-2);line-height:1.5;margin-bottom:14px;" id="rr-hint">
+        Pool owes you for your out-of-pocket purchases. Your admin will be notified to confirm.
+      </div>
+      <label for="rr-amount">Amount ($)</label>
+      <input type="number" id="rr-amount" class="field" min="0" step="0.01" placeholder="0.00">
+      <label for="rr-note" style="margin-top:14px;">Note (optional)</label>
+      <input type="text" id="rr-note" class="field" maxlength="200" placeholder="e.g. partial reimbursement for tool purchases">
+      <div class="msg" id="rr-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="rr-cancel">Cancel</button>
+      <button class="btn btn-primary" id="rr-submit">Submit request</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin-side: list of members the pool owes -->
+<div class="modal" id="modal-pool-owes" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:80vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Pool owes members</div>
+    <div class="modal-body" id="po-body" style="overflow-y:auto;min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="po-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin-side: cash reimbursement + optional dues offset -->
+<div class="modal" id="modal-mark-reimbursed" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Mark reimbursed</div>
+    <div class="modal-body">
+      <div style="font-size:15px;font-weight:700;" id="mr-name">Member</div>
+      <div style="font-size:12px;color:var(--c-text-2);margin-top:2px;" id="mr-net">Net owed: $0.00</div>
+      <label for="mr-cash" style="margin-top:16px;">Cash reimbursed ($)</label>
+      <input type="number" id="mr-cash" class="field" min="0" step="0.01" placeholder="0.00">
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;line-height:1.45;">Real money sent to the member from the pool.</div>
+      <label style="margin-top:14px;display:flex;align-items:center;gap:8px;font-weight:600;">
+        <input type="checkbox" id="mr-offset-toggle" style="width:auto;margin:0;"> Apply some of the credit to unpaid dues instead
+      </label>
+      <div id="mr-offset-wrap" hidden style="margin-top:8px;">
+        <label for="mr-offset">Dues offset ($)</label>
+        <input type="number" id="mr-offset" class="field" min="0" step="0.01" placeholder="0.00">
+        <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">Reduces the member's owed dues by this amount in lieu of cash.</div>
+      </div>
+      <label for="mr-note" style="margin-top:14px;">Note (optional)</label>
+      <input type="text" id="mr-note" class="field" maxlength="200" placeholder="e.g. Venmo on Jun 6">
+      <div class="msg" id="mr-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="mr-cancel">Cancel</button>
+      <button class="btn btn-primary" id="mr-save">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Member-side: submit a new expense for admin approval -->
+<div class="modal" id="modal-submit-expense" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Submit expense</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--c-text-2);line-height:1.5;margin-bottom:14px;">
+        Send your admin an out-of-pocket purchase to confirm. Once approved it'll show up as your expense and the pool will owe you for it.
+      </div>
+      <label for="se-desc">Description</label>
+      <input type="text" id="se-desc" class="field" maxlength="200" placeholder="e.g. Spare battery">
+      <label for="se-amount" style="margin-top:14px;">Amount ($)</label>
+      <input type="number" id="se-amount" class="field" min="0" step="0.01" placeholder="0.00">
+      <label for="se-cat" style="margin-top:14px;">Category</label>
+      <select id="se-cat" class="field">
+        <option value="general">General</option>
+        <option value="tools">Tools</option>
+        <option value="supplies">Supplies</option>
+        <option value="travel">Travel</option>
+        <option value="food">Food</option>
+        <option value="other">Other</option>
+      </select>
+      <div class="msg" id="se-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="se-cancel">Cancel</button>
+      <button class="btn btn-primary" id="se-submit">Submit</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal-mark-dues" hidden>
   <div class="modal-backdrop"></div>
   <div class="modal-sheet">
@@ -1908,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.54';
+var APP_VERSION = 'V2-CLUB.55';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -3277,20 +3391,29 @@ function _renderClubDashboardMember(d, t, el, opts){
   var contribValue = Number(d.my_year_contributed || 0);
   var memberDirHint = d.directory_id || (state.viewingMember && state.viewingMember.directory_id) || (t && t.my_directory_id);
   var contributionCard = (d.my_year_contributed != null)
-    ? '<div id="member-contrib-card" style="cursor:pointer;" '+
+    ? '<div id="member-contrib-card" style="cursor:pointer;text-align:right;" '+
           'data-mb-dir="'+esc(memberDirHint||'')+'" data-mb-year="'+esc(String(year||''))+'">'+
         '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Contributed in '+year+'</div>'+
-        '<div style="font-size:22px;font-weight:800;margin-top:2px;display:inline-flex;align-items:center;">'+
+        '<div style="font-size:22px;font-weight:800;margin-top:2px;display:inline-flex;align-items:center;justify-content:flex-end;">'+
           money(contribValue) +
           '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
         '</div>'+
-        // Spent row underneath. Starts hidden; the async backfill
-        // toggles visibility once we know the year's spent total.
-        '<div id="member-spent-row" hidden style="margin-top:10px;cursor:pointer;" '+
-          'data-mb-dir="'+esc(memberDirHint||'')+'" data-mb-year="'+esc(String(year||''))+'">'+
-          '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Spent in '+year+'</div>'+
-          '<div style="font-size:18px;font-weight:800;margin-top:2px;color:#ff453a;display:inline-flex;align-items:center;">'+
-            '<span id="member-spent-value">—</span>'+
+        // Out-of-pocket NET — pool-funded reimbursements subtracted.
+        // Replaces the old "Spent in YYYY" line. Hidden until backfill
+        // resolves a non-zero net.
+        '<div id="member-oop-row" hidden style="margin-top:10px;cursor:pointer;text-align:right;">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Out of pocket</div>'+
+          '<div style="font-size:18px;font-weight:800;margin-top:2px;color:#ff453a;display:inline-flex;align-items:center;justify-content:flex-end;">'+
+            '<span id="member-oop-value">—</span>'+
+            '<span style="font-size:13px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
+          '</div>'+
+        '</div>'+
+        // Pool-owes-you mirror of net OOP — same number, green tone,
+        // routes into the Request Reimbursement form.
+        '<div id="member-pow-row" hidden style="margin-top:10px;cursor:pointer;text-align:right;">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Pool owes you</div>'+
+          '<div style="font-size:18px;font-weight:800;margin-top:2px;color:#30d158;display:inline-flex;align-items:center;justify-content:flex-end;">'+
+            '+<span id="member-pow-value">—</span>'+
             '<span style="font-size:13px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
           '</div>'+
         '</div>'+
@@ -3624,7 +3747,8 @@ function _renderClubDashboardMember(d, t, el, opts){
       at:        r.created_at,
       amount:    r.requested_amount,
       period_label: r.dues_period_label,
-      request_type: r.request_type
+      request_type: r.request_type,
+      note:      r.note
     };
   });
 
@@ -3644,11 +3768,26 @@ function _renderClubDashboardMember(d, t, el, opts){
     var editedAudit = (!isGhost && ev.ref) ? memberEditedById[ev.ref] : null;
     if(ev.kind === 'pending_claim'){
       var isEntry = ev.request_type === 'entry_fee_payment_claim';
-      lbl = isEntry
-        ? 'Payment for entry fee'
-        : ('Payment for ' + (ev.period_label || 'dues'));
-      color = '#ff9f0a';
-      sign = '+';
+      var isReimb = ev.request_type === 'reimbursement_request';
+      var isExpSub = ev.request_type === 'expense_submission';
+      if(isReimb){
+        lbl = 'Reimbursement request';
+        color = '#30d158';   // green — pool will owe you less / pay you
+        sign = '+';
+      } else if(isExpSub){
+        // Note packs "category|description"; show description.
+        var raw = ev.note || '';
+        var sep = raw.indexOf('|');
+        lbl = sep > -1 ? raw.slice(sep+1) : (raw || 'Submitted expense');
+        color = '#ff453a';
+        sign = '-';
+      } else {
+        lbl = isEntry
+          ? 'Payment for entry fee'
+          : ('Payment for ' + (ev.period_label || 'dues'));
+        color = '#ff9f0a';
+        sign = '+';
+      }
       statusBadge =
         '<span style="display:inline-block;font-size:9.5px;font-weight:700;'+
         'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
@@ -3767,13 +3906,13 @@ function _renderClubDashboardMember(d, t, el, opts){
     };
   }
   // Async backfill: load this member's spent total and reveal the
-  // Spent row if it's non-zero. Cached in state.memberSpentCache so
-  // a subsequent render in the same session doesn't re-fetch.
+  // Net balance (Out of Pocket + Pool Owes You). Cached in
+  // state.memberNetBalanceCache so a subsequent render in the same
+  // session doesn't re-fetch; _fullRefresh clears it.
   (function(){
     var dirHint = contribEl && contribEl.dataset.mbDir;
-    var yrHint  = contribEl && parseInt(contribEl.dataset.mbYear, 10);
-    if(!dirHint || !yrHint || !t || !t.trip_id) return;
-    _loadMemberSpentValue(t.trip_id, dirHint, yrHint);
+    if(!dirHint || !t || !t.trip_id) return;
+    _loadMemberNetBalance(t.trip_id, dirHint);
   })();
 
   // (Old inline Mark-paid wiring removed in V2-CLUB.29 — the buttons
@@ -4179,35 +4318,65 @@ function _renderMemberBreakdown(){
 // Helper for the member view's spent row backfill (see hero card).
 // Returns nothing; reads the value, caches it, and toggles the
 // inline row's visibility based on whether it's > 0.
-async function _loadMemberSpentValue(tripId, dirId, year){
-  var key = tripId+':'+dirId+':'+year;
-  if(state.memberSpentCache[key] != null){
-    _applyMemberSpentToDom(state.memberSpentCache[key]);
+async function _loadMemberNetBalance(tripId, dirId){
+  // Cache key per (trip, member). Persisted on state so toggling tabs
+  // doesn't re-fetch unnecessarily, and so _fullRefresh's cache wipe
+  // forces a fresh pull.
+  var key = tripId+':'+dirId;
+  state.memberNetBalanceCache = state.memberNetBalanceCache || {};
+  if(state.memberNetBalanceCache[key] != null){
+    _applyMemberNetBalanceToDom(state.memberNetBalanceCache[key]);
     return;
   }
   try{
-    var res = await sb.rpc('get_member_pool_breakdown',
-      { p_trip: tripId, p_dir: dirId, p_year: year });
+    var res = await sb.rpc('get_member_net_balance',
+      { p_trip: tripId, p_dir: dirId });
     if(res.error || !res.data) return;
-    var val = (res.data.spent && res.data.spent.year) || 0;
-    state.memberSpentCache[key] = val;
-    _applyMemberSpentToDom(val);
-  }catch(err){ /* silently degrade — the row stays hidden */ }
+    state.memberNetBalanceCache[key] = res.data;
+    _applyMemberNetBalanceToDom(res.data);
+  }catch(err){ /* silently degrade — rows stay hidden */ }
+}
+
+function _applyMemberNetBalanceToDom(nb){
+  if(!nb) return;
+  var net = Number(nb.net_out_of_pocket || 0);
+  var rowOOP = document.getElementById('member-oop-row');
+  var valOOP = document.getElementById('member-oop-value');
+  if(rowOOP && valOOP){
+    if(net > 0.005){
+      valOOP.textContent = money(net);
+      rowOOP.hidden = false;
+      rowOOP.onclick = openMemberOutOfPocketModal;
+    } else {
+      rowOOP.hidden = true;
+    }
+  }
+  // Pool-owes-you mirrors net_out_of_pocket — same number, green
+  // affordance with the Request Reimbursement entry point.
+  var rowPow = document.getElementById('member-pow-row');
+  var valPow = document.getElementById('member-pow-value');
+  if(rowPow && valPow){
+    if(net > 0.005){
+      valPow.textContent = money(net);
+      rowPow.hidden = false;
+      rowPow.onclick = openRequestReimbursementModal;
+    } else {
+      rowPow.hidden = true;
+    }
+  }
+}
+
+// Legacy entry point — Recent Activity rows and external callers
+// reference this name. Routes to the richer net-balance loader so the
+// "Spent → Out of pocket" relabel works without touching call sites.
+async function _loadMemberSpentValue(tripId, dirId, year){
+  return _loadMemberNetBalance(tripId, dirId);
 }
 
 function _applyMemberSpentToDom(val){
-  var valueEl = document.getElementById('member-spent-value');
-  var rowEl   = document.getElementById('member-spent-row');
-  if(!valueEl || !rowEl) return;
-  if(Number(val) > 0){
-    valueEl.textContent = money(val);
-    rowEl.hidden = false;
-    rowEl.onclick = function(){
-      openMemberBreakdown(rowEl.dataset.mbDir, parseInt(rowEl.dataset.mbYear, 10));
-    };
-  } else {
-    rowEl.hidden = true;
-  }
+  // Retained for binary compatibility but no longer called from the
+  // new render path. Kept as a no-op so older callers don't crash.
+  return;
 }
 
 // Opened from the member-view status card. Lists every outstanding
@@ -4447,6 +4616,7 @@ async function _fullRefresh(){
   state.expensesLoadedFor      = null;
   state.settlementLoadedFor    = null;
   state.memberSpentCache       = {};
+  state.memberNetBalanceCache  = {};
   // Re-pull the bell state in parallel with the surface re-render so
   // the bell badge reflects the new world after the action lands.
   var notifsPromise;
@@ -4479,15 +4649,20 @@ function openMemberAction(){
 function memberPickAddExpense(){
   closeModal('modal-member-action');
   setTimeout(function(){
-    // In a club we always use the club-specific expense modal so the
-    // Pre-payment / Split Between fields from the trip flow never
-    // appear here. The club modal's Paid By dropdown adapts to the
-    // caller's role: an admin/treasurer can charge POOL or any
-    // member, while a regular member is locked to their own row.
-    if(state.trip && state.trip.kind === 'club'){
-      _openClubExpenseModalFresh();
+    // Role split. Admin/treasurer hit the regular club expense modal
+    // (instant insert via add_club_expense). A plain member can't
+    // insert directly — they submit an expense_submission request that
+    // an admin approves through the bell.
+    var t = state.trip;
+    var isAdminEff = !!(t && (t.is_admin || state.is_treasurer || t.is_global_admin));
+    if(isAdminEff){
+      if(t && t.kind === 'club'){
+        _openClubExpenseModalFresh();
+      } else {
+        openExpenseModal(null);
+      }
     } else {
-      openExpenseModal(null);
+      openSubmitExpenseModal();
     }
   }, 180);
 }
@@ -5147,6 +5322,17 @@ function _auditLabel(ev){
       }
       return actor + ' edited ' + elabel + ' for ' + target;
     }
+    case 'reimbursement_issued': {
+      // Combined cash + offset summary so the audit row tells the
+      // whole story at a glance.
+      var ramt = Number(payload.amount || 0);
+      var rofs = Number(payload.offset || 0);
+      var parts = [];
+      if(ramt > 0) parts.push(money(ramt) + ' cash');
+      if(rofs > 0) parts.push(money(rofs) + ' offset to dues');
+      var detail = parts.length ? ' (' + parts.join(' + ') + ')' : '';
+      return actor + ' reimbursed ' + target + detail;
+    }
     default:
       return actor + ' performed ' + (ev.action || 'an action');
   }
@@ -5183,6 +5369,238 @@ function _renderEditedPip(audit){
         oldA+' → '+newA+'</span>'
     : '';
   return pip + delta;
+}
+
+// =====================================================================
+//  REIMBURSEMENT + OUT-OF-POCKET + EXPENSE SUBMISSION FLOWS
+// =====================================================================
+
+// --- Member: Out of Pocket breakdown modal ---
+async function openMemberOutOfPocketModal(){
+  openModal('modal-out-of-pocket');
+  $('oop-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var dir = (state.viewingMember && state.viewingMember.directory_id) ||
+              (state.trip && state.trip.my_directory_id);
+    var nbRes = await sb.rpc('get_member_net_balance',
+      { p_trip: state.trip.trip_id, p_dir: dir });
+    if(nbRes.error) throw nbRes.error;
+    var nb = nbRes.data || {};
+    // Pull the year activity so we can list individual expenses with
+    // a "settled / pending" status next to each.
+    var feedRes = await sb.rpc('get_member_year_activity',
+      { p_trip: state.trip.trip_id, p_dir: dir });
+    var items = (feedRes && feedRes.data) || [];
+    // Filter to out-of-pocket expense rows; reimbursement-category
+    // entries are aggregated separately as the offset.
+    var oopRows = items.filter(function(ev){ return ev.kind === 'expense'; });
+    var summary =
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 14px;'+
+        'padding:10px 0;border-bottom:1px solid var(--c-border);font-size:13px;">'+
+        '<div style="color:var(--c-text-2);">Total spent</div>'+
+        '<div style="font-weight:700;text-align:right;">'+money(nb.out_of_pocket_spent||0)+'</div>'+
+        '<div style="color:var(--c-text-2);">Reimbursed</div>'+
+        '<div style="font-weight:700;text-align:right;color:#30d158;">−'+money(nb.reimbursed_total||0)+'</div>'+
+        '<div style="color:var(--c-text);font-weight:700;">Net out of pocket</div>'+
+        '<div style="font-weight:800;text-align:right;color:#ff9f0a;">'+money(nb.net_out_of_pocket||0)+'</div>'+
+      '</div>';
+    var listHtml = '';
+    oopRows.forEach(function(ev){
+      var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
+        {month:'short', day:'numeric', year:'numeric'}) : '';
+      // Reimbursement status: if there's any reimbursement row for the
+      // year and the running net is at/below zero, we treat everything
+      // up to that point as settled. Simpler indicator without per-row
+      // tracking: show "Pending reimbursement" while net > 0.
+      var statusPip = (Number(nb.net_out_of_pocket||0) > 0.005)
+        ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+            'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+            'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Pending</span>'
+        : '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+            'padding:1px 6px;border-radius:6px;background:rgba(48,209,88,0.18);'+
+            'color:#30d158;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Settled</span>';
+      listHtml +=
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--c-border);">'+
+          '<div style="min-width:0;flex:1;">'+
+            '<div style="font-size:13px;color:var(--c-text);">'+esc(ev.description || 'Expense')+ statusPip +'</div>'+
+            '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(when)+'</div>'+
+          '</div>'+
+          '<div style="font-size:14px;font-weight:700;color:#ff453a;margin-left:10px;white-space:nowrap;">−'+money(ev.amount||0)+'</div>'+
+        '</div>';
+    });
+    if(!listHtml){
+      listHtml = '<div style="padding:14px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No out-of-pocket expenses this year.</div>';
+    }
+    $('oop-body').innerHTML = summary + listHtml;
+  }catch(err){
+    $('oop-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+function closeOutOfPocketModal(){ closeModal('modal-out-of-pocket'); }
+
+// --- Member: Request reimbursement modal ---
+function openRequestReimbursementModal(){
+  var dir = state.trip && state.trip.my_directory_id;
+  var nb = (state.memberNetBalanceCache || {})[state.trip.trip_id+':'+dir];
+  var net = nb ? Number(nb.net_out_of_pocket || 0) : 0;
+  $('rr-hint').textContent = 'Pool currently owes you '+money(net)+
+    '. Your admin will be notified to confirm. You can request the full amount or part of it.';
+  $('rr-amount').value = net > 0 ? net.toFixed(2) : '';
+  $('rr-note').value = '';
+  $('rr-msg').className = 'msg';
+  $('rr-msg').textContent = '';
+  openModal('modal-request-reimburse');
+}
+async function submitReimbursementRequest(){
+  var amt = parseFloat($('rr-amount').value);
+  var note = ($('rr-note').value || '').trim() || null;
+  function setMsg(t){ $('rr-msg').className='msg show err'; $('rr-msg').textContent=t; }
+  if(!(amt > 0)){ setMsg('Enter an amount.'); return; }
+  var btn = $('rr-submit');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  try{
+    var res = await sb.rpc('submit_reimbursement_request', {
+      p_trip: state.trip.trip_id, p_amount: amt, p_note: note
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-request-reimburse');
+    toast('Request submitted — your admin will review it');
+    await _fullRefresh();
+  }catch(err){ setMsg(err.message || 'Could not submit.'); }
+  btn.disabled = false; btn.textContent = 'Submit request';
+}
+
+// --- Admin: Pool Owes Members modal ---
+async function openPoolOwesMembersModal(){
+  openModal('modal-pool-owes');
+  $('po-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_club_reimbursement_summary',
+      { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var data = res.data || { members: [], total_pool_owes: 0 };
+    var members = data.members || [];
+    if(members.length === 0){
+      $('po-body').innerHTML =
+        '<div class="empty"><div class="empty-title">All settled</div>'+
+        '<div class="empty-sub">No members are currently owed any out-of-pocket reimbursements.</div></div>';
+      return;
+    }
+    var html =
+      '<div style="font-size:13px;color:var(--c-text-2);padding:6px 0 12px;border-bottom:1px solid var(--c-border);">'+
+        'Total: <strong style="color:var(--c-text);">'+money(data.total_pool_owes||0)+'</strong></div>';
+    members.forEach(function(m){
+      html +=
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:0.5px solid var(--c-border);">'+
+          '<div style="min-width:0;flex:1;">'+
+            '<div style="font-size:14px;font-weight:700;color:var(--c-text);">'+esc(m.display_name||'')+'</div>'+
+            '<div style="font-size:12px;color:#ff9f0a;font-weight:700;margin-top:2px;">'+money(m.net_owed)+' owed</div>'+
+          '</div>'+
+          '<button class="btn btn-primary" style="padding:7px 14px;font-size:12.5px;" '+
+            'data-po-dir="'+esc(m.directory_id)+'" data-po-name="'+esc(m.display_name||'')+'" '+
+            'data-po-net="'+esc(String(m.net_owed))+'">Mark reimbursed</button>'+
+        '</div>';
+    });
+    $('po-body').innerHTML = html;
+    // Wire each Mark Reimbursed button.
+    document.querySelectorAll('#po-body [data-po-dir]').forEach(function(b){
+      b.onclick = function(){
+        openMarkReimbursedModal({
+          dir:  b.dataset.poDir,
+          name: b.dataset.poName,
+          net:  Number(b.dataset.poNet || 0)
+        });
+      };
+    });
+  }catch(err){
+    $('po-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+// --- Admin: Mark Reimbursed modal ---
+function openMarkReimbursedModal(ctx){
+  state.markReimbursedCtx = ctx;
+  $('mr-name').textContent = ctx.name || 'Member';
+  $('mr-net').textContent = 'Net owed: ' + money(ctx.net || 0);
+  $('mr-cash').value = (ctx.net > 0) ? Number(ctx.net).toFixed(2) : '';
+  $('mr-offset-toggle').checked = false;
+  $('mr-offset').value = '';
+  $('mr-offset-wrap').hidden = true;
+  $('mr-note').value = '';
+  $('mr-msg').className = 'msg';
+  $('mr-msg').textContent = '';
+  openModal('modal-mark-reimbursed');
+}
+async function submitMarkReimbursed(){
+  var ctx = state.markReimbursedCtx || {};
+  var cash = parseFloat($('mr-cash').value) || 0;
+  var offset = $('mr-offset-toggle').checked
+    ? (parseFloat($('mr-offset').value) || 0)
+    : 0;
+  var note = ($('mr-note').value || '').trim() || null;
+  function setMsg(t){ $('mr-msg').className='msg show err'; $('mr-msg').textContent=t; }
+  if(cash <= 0 && offset <= 0){
+    setMsg('Enter a cash amount, an offset, or both.'); return;
+  }
+  if((cash + offset) > (Number(ctx.net||0) + 0.005)){
+    if(!await alertModal('Total exceeds the net owed of '+money(ctx.net||0)+
+       '. The pool balance can go negative. Proceed?',
+       { confirm:true, confirmLabel:'Proceed' })){ return; }
+  }
+  var btn = $('mr-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var res = await sb.rpc('mark_member_reimbursed', {
+      p_trip:                  state.trip.trip_id,
+      p_dir:                   ctx.dir,
+      p_reimburse_amount:      cash,
+      p_apply_to_dues_amount:  offset,
+      p_note:                  note
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-mark-reimbursed');
+    closeModal('modal-pool-owes');
+    toast('Reimbursement recorded');
+    await _fullRefresh();
+  }catch(err){ setMsg(err.message || 'Could not save.'); }
+  btn.disabled = false; btn.textContent = 'Confirm';
+}
+
+// --- Member: Submit Expense modal ---
+function openSubmitExpenseModal(){
+  $('se-desc').value = '';
+  $('se-amount').value = '';
+  $('se-cat').value = 'general';
+  $('se-msg').className = 'msg';
+  $('se-msg').textContent = '';
+  openModal('modal-submit-expense');
+}
+async function submitMemberExpense(){
+  var desc = ($('se-desc').value || '').trim();
+  var amt  = parseFloat($('se-amount').value);
+  var cat  = $('se-cat').value || 'general';
+  function setMsg(t){ $('se-msg').className='msg show err'; $('se-msg').textContent=t; }
+  if(!desc){ setMsg('Description is required.'); return; }
+  if(!(amt > 0)){ setMsg('Enter an amount.'); return; }
+  var btn = $('se-submit');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  try{
+    var res = await sb.rpc('submit_member_expense', {
+      p_trip:        state.trip.trip_id,
+      p_description: desc,
+      p_amount:      amt,
+      p_category:    cat
+    });
+    if(res.error) throw res.error;
+    closeModal('modal-submit-expense');
+    toast('Expense submitted — your admin will review it');
+    await _fullRefresh();
+  }catch(err){ setMsg(err.message || 'Could not submit.'); }
+  btn.disabled = false; btn.textContent = 'Submit';
 }
 function _renderPaymentMethodPicker(){
   var methods = [
@@ -5541,6 +5959,10 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('Pool Balance', money(d.pool_balance||0),
                { id:'ss-pool-balance', clickable:true,
                  hint:'tap for breakdown' }) +
+      // Pool Owes Members — async backfill via get_club_reimbursement_summary
+      _statRow('Pool Owes Members', '—',
+               { id:'ss-pool-owes', clickable:true,
+                 hint:'reimbursements pending' }) +
       _statRow('Over Dues '+esc((d.year||'')+''),
                money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
                { hint:'collected of billed' }) +
@@ -5763,6 +6185,31 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   var poolEl = el.querySelector('#ss-pool-balance');
   if(poolEl){
     poolEl.onclick = function(){ openPoolBreakdown(); };
+  }
+
+  // Pool Owes Members — async fetch of the reimbursement summary, then
+  // populate the row's value and wire the click handler. Hidden when
+  // nothing's owed so admin doesn't see "—" lingering.
+  var owesEl = el.querySelector('#ss-pool-owes');
+  if(owesEl){
+    sb.rpc('get_club_reimbursement_summary',
+      { p_trip: state.trip.trip_id }).then(function(res){
+      if(res.error || !res.data) return;
+      var total = Number(res.data.total_pool_owes || 0);
+      var valueDiv = owesEl.querySelector('div:nth-child(2)');
+      if(total > 0.005){
+        if(valueDiv){
+          valueDiv.innerHTML =
+            money(total) +
+            '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>';
+          valueDiv.style.color = '#ff9f0a';
+        }
+        owesEl.onclick = openPoolOwesMembersModal;
+        owesEl.style.display = '';
+      } else {
+        owesEl.style.display = 'none';
+      }
+    });
   }
 
   // -----  Wire interactions  -----
@@ -10567,7 +11014,9 @@ function renderNotifs(){
     return r && r.status === 'pending'
       && r.initiated_by_me === true
       && (r.request_type === 'dues_payment_claim'
-          || r.request_type === 'entry_fee_payment_claim');
+          || r.request_type === 'entry_fee_payment_claim'
+          || r.request_type === 'reimbursement_request'
+          || r.request_type === 'expense_submission');
   }
   var rawList = state.notifs || [];
   var rawMemb = state.memberRequests || [];
@@ -10606,6 +11055,8 @@ function renderNotifs(){
     var isMakeAdmin = (r.request_type === 'make_admin');
     var isDuesClaim = (r.request_type === 'dues_payment_claim');
     var isEntryFeeClaim = (r.request_type === 'entry_fee_payment_claim');
+    var isReimburse = (r.request_type === 'reimbursement_request');
+    var isExpenseSubmit = (r.request_type === 'expense_submission');
     var headTxt;
     if(isLeave){
       headTxt = isRejected ? 'Leave request declined'
@@ -10623,6 +11074,14 @@ function renderNotifs(){
       headTxt = isRejected ? 'Entry fee claim declined'
               : isApproved ? 'Entry fee claim approved'
               : 'Entry fee payment claim';
+    }else if(isReimburse){
+      headTxt = isRejected ? 'Reimbursement declined'
+              : isApproved ? 'Reimbursement approved'
+              : 'Reimbursement request';
+    }else if(isExpenseSubmit){
+      headTxt = isRejected ? 'Expense submission declined'
+              : isApproved ? 'Expense submission approved'
+              : 'Expense submission';
     }
     h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'">'+
       '<div class="notif-head">'+headTxt+'</div>'+
@@ -10687,6 +11146,46 @@ function renderNotifs(){
       }
       if(r.note){
         h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
+      }
+    }else if(isReimburse){
+      var rAmt = (r.requested_amount != null) ? money(Number(r.requested_amount)||0) : '';
+      if(isApproved){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' reimbursement request was approved'+(rAmt?' ('+rAmt+')':'')+'</div>';
+      } else if(isRejected){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' reimbursement request was declined</div>';
+      } else if(r.initiated_by_me){
+        h += '<div class="notif-title">Waiting for admin to approve your reimbursement'+
+             (rAmt?' ('+rAmt+')':'')+'</div>';
+      } else {
+        h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
+             ' is requesting a reimbursement of '+rAmt+'</div>';
+      }
+      if(r.note){
+        h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
+      }
+    }else if(isExpenseSubmit){
+      var eAmt = (r.requested_amount != null) ? money(Number(r.requested_amount)||0) : '';
+      // Note packs "category|description" — split for display.
+      var eRaw = r.note || '';
+      var sep = eRaw.indexOf('|');
+      var eDesc = sep > -1 ? eRaw.slice(sep+1) : eRaw;
+      var eCat  = sep > -1 ? eRaw.slice(0, sep) : '';
+      if(isApproved){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' expense was approved'+(eAmt?' ('+eAmt+')':'')+'</div>';
+      } else if(isRejected){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' expense submission was declined</div>';
+      } else if(r.initiated_by_me){
+        h += '<div class="notif-title">Waiting for admin to approve your '+esc(eDesc||'expense')+
+             (eAmt?' ('+eAmt+')':'')+'</div>';
+      } else {
+        h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
+             ' submitted '+esc(eDesc||'an expense')+
+             (eAmt?' ('+eAmt+')':'')+
+             (eCat ? ' · '+esc(eCat) : '')+'</div>';
       }
     }
     if(isRejected && r.rejection_reason){
@@ -11241,6 +11740,19 @@ $('et-save').onclick   = doSaveEditTransaction;
 $('et-delete').onclick = doDeleteEditTransaction;
 // Manage Unpaid modal close button.
 $('mu-close').onclick  = function(){ closeModal('modal-manage-unpaid'); };
+// Reimbursement & expense-submission modals.
+$('oop-close').onclick = function(){ closeModal('modal-out-of-pocket'); };
+$('rr-cancel').onclick = function(){ closeModal('modal-request-reimburse'); };
+$('rr-submit').onclick = submitReimbursementRequest;
+$('po-close').onclick  = function(){ closeModal('modal-pool-owes'); };
+$('mr-cancel').onclick = function(){ closeModal('modal-mark-reimbursed'); };
+$('mr-save').onclick   = submitMarkReimbursed;
+$('mr-offset-toggle').onchange = function(){
+  $('mr-offset-wrap').hidden = !$('mr-offset-toggle').checked;
+  if(!$('mr-offset-toggle').checked) $('mr-offset').value = '';
+};
+$('se-cancel').onclick = function(){ closeModal('modal-submit-expense'); };
+$('se-submit').onclick = submitMemberExpense;
 // Member breakdown modal.
 $('mb-close').onclick  = function(){ closeModal('modal-member-breakdown'); };
 $('mb-year').onchange  = function(){ _loadMemberBreakdown(parseInt($('mb-year').value, 10)); };
