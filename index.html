@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.61">
+<meta name="app-version" content="V2-CLUB.62">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.61';
+var APP_VERSION = 'V2-CLUB.62';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -11097,9 +11097,6 @@ async function refreshNotifs(){
   var notifsUnseen = (state.notifs || []).filter(function(x){ return !_isDismissedLocally(x.id); });
   var membUnseen   = (state.memberRequests || []).filter(function(x){
     if(_isDismissedLocally(x.id)) return false;
-    if(x && x.status === 'pending' && x.initiated_by_me &&
-       (x.request_type === 'dues_payment_claim'
-        || x.request_type === 'entry_fee_payment_claim')) return false;
     return true;
   });
   var n = notifsUnseen.length + state.accessRequests.length + membUnseen.length;
@@ -11129,12 +11126,11 @@ function renderNotifs(){
   // would be noise. Resolved (approved / rejected) claims still appear
   // here so the member learns the outcome.
   function _ownPendingClaim(r){
-    return r && r.status === 'pending'
-      && r.initiated_by_me === true
-      && (r.request_type === 'dues_payment_claim'
-          || r.request_type === 'entry_fee_payment_claim'
-          || r.request_type === 'reimbursement_request'
-          || r.request_type === 'expense_submission');
+    // Bell now shows every pending member-request (including the
+    // caller's own), matching the badge count and Recent Activity.
+    // Returning false means "don't hide" — kept as a separate helper
+    // so the call sites stay readable.
+    return false;
   }
   var rawList = state.notifs || [];
   var rawMemb = state.memberRequests || [];
