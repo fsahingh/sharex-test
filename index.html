@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.57">
+<meta name="app-version" content="V2-CLUB.58">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.57';
+var APP_VERSION = 'V2-CLUB.58';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5394,52 +5394,112 @@ async function openMemberOutOfPocketModal(){
       { p_trip: state.trip.trip_id, p_dir: dir });
     if(nbRes.error) throw nbRes.error;
     var nb = nbRes.data || {};
-    // Pull the year activity so we can list individual expenses with
-    // a "settled / pending" status next to each.
     var feedRes = await sb.rpc('get_member_year_activity',
       { p_trip: state.trip.trip_id, p_dir: dir });
     var items = (feedRes && feedRes.data) || [];
-    // Filter to out-of-pocket expense rows; reimbursement-category
-    // entries are aggregated separately as the offset.
-    var oopRows = items.filter(function(ev){ return ev.kind === 'expense'; });
+
+    // Split the member's expense rows three ways:
+    //   - oopRows: kind='expense' AND paid_by_pool=false → real OOP
+    //   - poolFundedRows: kind='expense' AND paid_by_pool=true → bought
+    //     by the member but pool's money paid for it
+    //   - reimbursements: kind='expense' AND category='reimbursement'
+    //     AND paid_to matches dir → received reimbursement
+    // pool-funded rows aren't part of "spent" since the pool paid.
+    var oopRows = items.filter(function(ev){
+      return ev.kind === 'expense' && ev.paid_by_pool === false &&
+             ev.category !== 'reimbursement';
+    });
+    var poolFundedRows = items.filter(function(ev){
+      return ev.kind === 'expense' && ev.paid_by_pool === true &&
+             ev.category !== 'reimbursement';
+    });
+    var reimbursements = items.filter(function(ev){
+      return ev.kind === 'expense' && ev.category === 'reimbursement' &&
+             ev.paid_to === dir;
+    });
+
     var summary =
       '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 14px;'+
         'padding:10px 0;border-bottom:1px solid var(--c-border);font-size:13px;">'+
-        '<div style="color:var(--c-text-2);">Total spent</div>'+
+        '<div style="color:var(--c-text-2);">Total spent (out of pocket)</div>'+
         '<div style="font-weight:700;text-align:right;">'+money(nb.out_of_pocket_spent||0)+'</div>'+
         '<div style="color:var(--c-text-2);">Reimbursed</div>'+
         '<div style="font-weight:700;text-align:right;color:#30d158;">−'+money(nb.reimbursed_total||0)+'</div>'+
         '<div style="color:var(--c-text);font-weight:700;">Net out of pocket</div>'+
-        '<div style="font-weight:800;text-align:right;color:#ff9f0a;">'+money(nb.net_out_of_pocket||0)+'</div>'+
+        '<div style="font-weight:800;text-align:right;color:'+
+          (Number(nb.net_out_of_pocket||0) > 0.005 ? '#ff9f0a' : '#30d158')+';">'+
+          money(nb.net_out_of_pocket||0)+'</div>'+
       '</div>';
-    var listHtml = '';
-    oopRows.forEach(function(ev){
+
+    // Net > 0 means the running balance is still outstanding → pending.
+    // = 0 means everything's been reimbursed → settled.
+    var statusPip = (Number(nb.net_out_of_pocket||0) > 0.005)
+      ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+          'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+          'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Pending</span>'
+      : '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+          'padding:1px 6px;border-radius:6px;background:rgba(48,209,88,0.18);'+
+          'color:#30d158;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Settled</span>';
+
+    function _renderExpRow(ev, opts){
+      opts = opts || {};
       var when = ev.at ? new Date(ev.at).toLocaleDateString(undefined,
         {month:'short', day:'numeric', year:'numeric'}) : '';
-      // Reimbursement status: if there's any reimbursement row for the
-      // year and the running net is at/below zero, we treat everything
-      // up to that point as settled. Simpler indicator without per-row
-      // tracking: show "Pending reimbursement" while net > 0.
-      var statusPip = (Number(nb.net_out_of_pocket||0) > 0.005)
-        ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-            'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
-            'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Pending</span>'
-        : '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
-            'padding:1px 6px;border-radius:6px;background:rgba(48,209,88,0.18);'+
-            'color:#30d158;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Settled</span>';
-      listHtml +=
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--c-border);">'+
-          '<div style="min-width:0;flex:1;">'+
-            '<div style="font-size:13px;color:var(--c-text);">'+esc(ev.description || 'Expense')+ statusPip +'</div>'+
-            '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(when)+'</div>'+
-          '</div>'+
-          '<div style="font-size:14px;font-weight:700;color:#ff453a;margin-left:10px;white-space:nowrap;">−'+money(ev.amount||0)+'</div>'+
-        '</div>';
-    });
-    if(!listHtml){
-      listHtml = '<div style="padding:14px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No out-of-pocket expenses this year.</div>';
+      var labelStyle = 'font-size:13px;color:var(--c-text);';
+      var amtColor = opts.amtColor || '#ff453a';
+      var sign = opts.sign || '−';
+      var pip = opts.pip || '';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--c-border);">'+
+        '<div style="min-width:0;flex:1;">'+
+          '<div style="'+labelStyle+'">'+esc(ev.description || 'Expense')+ pip +'</div>'+
+          '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+esc(when)+'</div>'+
+        '</div>'+
+        '<div style="font-size:14px;font-weight:700;color:'+amtColor+';margin-left:10px;white-space:nowrap;">'+
+          sign+money(ev.amount||0)+'</div>'+
+      '</div>';
     }
-    $('oop-body').innerHTML = summary + listHtml;
+
+    var html = summary;
+
+    // Section 1: out-of-pocket purchases (the ones in the totals).
+    if(oopRows.length > 0){
+      html += '<div style="font-size:10.5px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.6px;padding:14px 0 2px;">Out-of-pocket purchases</div>';
+      oopRows.forEach(function(ev){
+        html += _renderExpRow(ev, { pip: statusPip });
+      });
+    }
+
+    // Section 2: reimbursements received.
+    if(reimbursements.length > 0){
+      html += '<div style="font-size:10.5px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.6px;padding:14px 0 2px;">Reimbursements received</div>';
+      reimbursements.forEach(function(ev){
+        html += _renderExpRow(ev, { sign: '+', amtColor: '#30d158' });
+      });
+    }
+
+    // Section 3: pool-funded purchases — informational. The member
+    // bought it but the pool's money paid; it doesn't enter "spent".
+    if(poolFundedRows.length > 0){
+      html += '<div style="font-size:10.5px;font-weight:700;color:var(--c-text-3);'+
+        'text-transform:uppercase;letter-spacing:0.6px;padding:14px 0 2px;">Pool-funded purchases</div>'+
+        '<div style="font-size:11px;color:var(--c-text-3);padding-bottom:6px;line-height:1.45;">'+
+          'You bought these but the pool paid for them — they don\'t count as out of pocket.'+
+        '</div>';
+      poolFundedRows.forEach(function(ev){
+        var poolPip = '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+          'padding:1px 6px;border-radius:6px;background:rgba(10,132,255,0.18);'+
+          'color:#0a84ff;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">Pool</span>';
+        html += _renderExpRow(ev, { pip: poolPip, amtColor: 'var(--c-text-3)' });
+      });
+    }
+
+    if(oopRows.length + reimbursements.length + poolFundedRows.length === 0){
+      html += '<div style="padding:14px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No expenses this year.</div>';
+    }
+
+    $('oop-body').innerHTML = html;
   }catch(err){
     $('oop-body').innerHTML =
       '<div class="empty"><div class="empty-title">Could not load</div>'+
