@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.59">
+<meta name="app-version" content="V2-CLUB.60">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.59';
+var APP_VERSION = 'V2-CLUB.60';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -5607,7 +5607,12 @@ function openMarkReimbursedModal(ctx){
   state.markReimbursedCtx = ctx;
   $('mr-name').textContent = ctx.name || 'Member';
   $('mr-net').textContent = 'Net owed: ' + money(ctx.net || 0);
-  $('mr-cash').value = (ctx.net > 0) ? Number(ctx.net).toFixed(2) : '';
+  // Default: full amount as cash, no offset. Toggling the offset
+  // checkbox subtracts the offset from the cash field automatically
+  // so the totals stay balanced and the user doesn't have to compute
+  // the leftover by hand.
+  var net = Number(ctx.net || 0);
+  $('mr-cash').value = (net > 0) ? net.toFixed(2) : '';
   $('mr-offset-toggle').checked = false;
   $('mr-offset').value = '';
   $('mr-offset-wrap').hidden = true;
@@ -5615,6 +5620,22 @@ function openMarkReimbursedModal(ctx){
   $('mr-msg').className = 'msg';
   $('mr-msg').textContent = '';
   openModal('modal-mark-reimbursed');
+}
+
+// When the offset value changes, the cash field follows so that
+// cash + offset = net by default. The user can still override either
+// field manually if their real-world payment doesn't add up that way
+// (a warning fires on submit if the total exceeds net).
+function _mrRecomputeCash(){
+  var ctx = state.markReimbursedCtx || {};
+  var net = Number(ctx.net || 0);
+  if(!$('mr-offset-toggle').checked){
+    $('mr-cash').value = net > 0 ? net.toFixed(2) : '';
+    return;
+  }
+  var offset = parseFloat($('mr-offset').value) || 0;
+  var remaining = Math.max(net - offset, 0);
+  $('mr-cash').value = remaining > 0 ? remaining.toFixed(2) : '0';
 }
 async function submitMarkReimbursed(){
   var ctx = state.markReimbursedCtx || {};
@@ -11164,7 +11185,19 @@ function renderNotifs(){
               : isApproved ? 'Expense submission approved'
               : 'Expense submission';
     }
-    h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'">'+
+    // For reimbursement requests on the admin side, tagging the card
+    // with a data-* attribute lets us wire it to open the Pool Owes
+    // Members modal on tap. Admin-only: when this card is pending and
+    // i_can_decide=true, the whole card becomes a tap target in
+    // addition to the existing Approve / Reject buttons.
+    var cardClickAttr = '';
+    if(isReimburse && !isResolved && r.i_can_decide){
+      cardClickAttr = ' data-mr-open-reimburse="'+esc(r.id)+'"';
+    }
+    h += '<div class="notif-card'+(isRejected?' rejected':'')+(isApproved?' approved':'')+'"'+
+      cardClickAttr +
+      (cardClickAttr ? ' style="cursor:pointer;"' : '') +
+      '>'+
       '<div class="notif-head">'+headTxt+'</div>'+
       '<div class="notif-trip">'+esc(r.trip_name)+'</div>';
     // Body text — who is asking whom
@@ -11368,6 +11401,16 @@ function renderNotifs(){
     if(mc){ doCancelMemberRequest(mc.dataset.mrCancel); return; }
     var md = ev.target.closest('[data-mr-dismiss]');
     if(md){ doDismissMemberRequest(md.dataset.mrDismiss); return; }
+    // Reimbursement request card — tap anywhere outside the explicit
+    // Approve / Reject buttons opens the Pool Owes Members modal so
+    // the admin can review the full picture before deciding (e.g.
+    // applying a partial dues offset instead of straight cash).
+    var ropen = ev.target.closest('[data-mr-open-reimburse]');
+    if(ropen){
+      closeModal('modal-notif');
+      openPoolOwesMembersModal();
+      return;
+    }
     // Expense change requests
     var a = ev.target.closest('[data-approve]');
     if(a){ doApproveRequest(a.dataset.approve); return; }
@@ -11831,7 +11874,12 @@ $('mr-save').onclick   = submitMarkReimbursed;
 $('mr-offset-toggle').onchange = function(){
   $('mr-offset-wrap').hidden = !$('mr-offset-toggle').checked;
   if(!$('mr-offset-toggle').checked) $('mr-offset').value = '';
+  _mrRecomputeCash();
 };
+// Live cash recompute as the offset value changes — so cash + offset
+// keeps adding up to the net owed by default.
+$('mr-offset').addEventListener('input',  _mrRecomputeCash);
+$('mr-offset').addEventListener('change', _mrRecomputeCash);
 $('se-cancel').onclick = function(){ closeModal('modal-submit-expense'); };
 $('se-submit').onclick = submitMemberExpense;
 // Member breakdown modal.
