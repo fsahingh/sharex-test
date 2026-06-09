@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.67">
+<meta name="app-version" content="V2-CLUB.73">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -43,7 +43,31 @@
   body{
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     background:var(--c-bg); color:var(--c-text); -webkit-font-smoothing:antialiased;
+    /* Disable native bounce/overscroll so our pull-to-refresh gesture
+       lands on its own. Keeps the page from rubber-banding above the
+       indicator while the user pulls. */
+    overscroll-behavior-y: contain;
   }
+
+  /* Pull-to-refresh indicator: hidden above viewport, slides down as
+     user pulls, and snaps back when they let go. */
+  .ptr-bar{
+    position:fixed; top:0; left:0; right:0; height:54px;
+    display:flex; align-items:center; justify-content:center;
+    pointer-events:none; z-index:9999;
+    transform:translateY(-60px);
+    transition:transform 0.22s cubic-bezier(.2,.7,.3,1);
+  }
+  .ptr-spinner{
+    width:26px; height:26px;
+    border:2.5px solid var(--c-border);
+    border-top-color:var(--c-tint);
+    border-radius:50%;
+  }
+  .ptr-bar.ptr-active .ptr-spinner{
+    animation:ptr-spin 0.85s linear infinite;
+  }
+  @keyframes ptr-spin{ to{ transform:rotate(360deg); } }
   [hidden]{display:none!important;}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
   input{font-family:inherit;}
@@ -913,6 +937,22 @@
           <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Money into the pool — donations, rentals, ad-hoc payments.</span>
         </span>
       </button>
+      <!-- Issue Fine — admin/treasurer can charge members for rule
+           violations. Rendered here because Issue Fine is a Club-level
+           action, not a personal one. -->
+      <button type="button" id="lac-pick-fine" class="btn btn-secondary"
+        style="width:100%;display:flex;align-items:flex-start;gap:14px;
+               padding:14px;margin:10px 0 0;min-height:auto;text-align:left;">
+        <span style="flex-shrink:0;width:36px;height:36px;border-radius:10px;
+                     background:rgba(255,159,10,0.18);color:#ff9f0a;
+                     display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <span style="flex:1;min-width:0;">
+          <span style="display:block;font-size:15px;font-weight:700;color:var(--c-text);">Issue Fine</span>
+          <span style="display:block;font-size:12px;color:var(--c-text-2);margin-top:2px;line-height:1.4;font-weight:400;">Charge one or more members for a rule violation.</span>
+        </span>
+      </button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="lac-cancel" style="flex:1;">Cancel</button>
@@ -1263,6 +1303,96 @@
     </div>
   </div>
 </div>
+
+<!-- ========================== FINES MODALS =========================== -->
+
+<!-- Admin-side: issue fines to one or more members in a single shot -->
+<div class="modal" id="modal-issue-fine" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:88vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Issue fine</div>
+    <div class="modal-body" style="overflow-y:auto;">
+      <label for="if-desc">Description <span style="color:var(--c-danger);">*</span></label>
+      <input type="text" id="if-desc" class="field" maxlength="200" placeholder="e.g. Missed monthly meeting">
+      <div style="font-size:11px;color:var(--c-text-3);margin-top:4px;">Required. Members will see this reason.</div>
+
+      <label style="margin-top:16px;">Amount</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;" id="if-amount-presets">
+        <button type="button" class="if-amt-chip" data-amt="50">$50</button>
+        <button type="button" class="if-amt-chip if-amt-custom-chip" data-amt="custom">Custom</button>
+      </div>
+      <input type="number" id="if-amount-custom" class="field" min="0" step="0.01" placeholder="Enter custom amount" hidden>
+
+      <label style="margin-top:16px;">Members</label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:11.5px;color:var(--c-text-3);" id="if-members-count">0 selected</span>
+        <button type="button" id="if-members-all" style="background:none;border:none;color:var(--c-tint);font-size:12px;font-weight:600;cursor:pointer;">Select all</button>
+      </div>
+      <div id="if-members-list" style="border:1px solid var(--c-border);border-radius:10px;max-height:200px;overflow-y:auto;background:var(--c-bg);"></div>
+
+      <div class="msg" id="if-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="if-cancel">Cancel</button>
+      <button class="btn btn-primary" id="if-submit">Issue fine</button>
+    </div>
+  </div>
+</div>
+
+<!-- Member/admin breakdown — list of fines with status -->
+<div class="modal" id="modal-fines-breakdown" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet" style="max-height:84vh;">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Fines</div>
+    <div class="modal-body" id="fb-body" style="overflow-y:auto;min-height:140px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="fb-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin: edit fine (description + amount) -->
+<div class="modal" id="modal-edit-fine" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Edit fine</div>
+    <div class="modal-body">
+      <label for="ef-desc">Description</label>
+      <input type="text" id="ef-desc" class="field" maxlength="200">
+      <label for="ef-amount" style="margin-top:14px;">Amount ($)</label>
+      <input type="number" id="ef-amount" class="field" min="0" step="0.01">
+      <div class="msg" id="ef-msg"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="ef-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ef-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .if-amt-chip{
+    background:var(--c-bg); border:1px solid var(--c-border);
+    border-radius:999px; padding:8px 16px; font-size:14px; font-weight:600;
+    color:var(--c-text); cursor:pointer;
+  }
+  .if-amt-chip.active{
+    background:var(--c-tint); border-color:var(--c-tint); color:#fff;
+  }
+  .if-mem-row{
+    display:flex; align-items:center;
+    padding:11px 14px; border-bottom:0.5px solid var(--c-border);
+    cursor:pointer;
+  }
+  .if-mem-row:last-child{ border-bottom:none; }
+  .if-mem-row input[type=checkbox]{
+    width:18px; height:18px; margin:0 18px 0 0; flex-shrink:0;
+  }
+  .if-mem-row .if-mem-name{ font-size:13.5px; color:var(--c-text); font-weight:600; }
+</style>
 
 <div class="modal" id="modal-mark-dues" hidden>
   <div class="modal-backdrop"></div>
@@ -2022,7 +2152,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.67';
+var APP_VERSION = 'V2-CLUB.73';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -2211,7 +2341,6 @@ function alertModal(message, opts){
     okBtn.textContent = opts.confirmLabel || (isConfirm ? 'OK' : 'OK');
     cxBtn.textContent = opts.cancelLabel || 'Cancel';
     cxBtn.hidden = !isConfirm;
-    // Visual emphasis for destructive actions.
     if(danger){ okBtn.style.background = 'var(--c-danger)'; okBtn.style.color = '#fff'; }
     else { okBtn.style.background = ''; okBtn.style.color = ''; }
     function cleanup(answer){
@@ -2225,6 +2354,44 @@ function alertModal(message, opts){
     cxBtn.onclick = function(){ cleanup(false); };
     $('modal-dialog').querySelector('.modal-backdrop').onclick = function(){ cleanup(false); };
     openModal('modal-dialog');
+  });
+}
+
+// Text-input version of alertModal. Resolves with the entered string,
+// or null if the user cancels / dismisses. Used by the "How did you
+// pay?" prompts on fine claims, entry-fee claims, etc.
+function promptModal(message, opts){
+  opts = opts || {};
+  return new Promise(function(resolve){
+    $('dlg-title').textContent = opts.title || 'Enter a value';
+    var safe = esc(message||'').replace(/\n/g,'<br>');
+    $('dlg-body').innerHTML =
+      '<div style="font-size:14px;line-height:1.45;color:var(--c-text);margin-bottom:12px;">'+safe+'</div>'+
+      '<input type="text" id="dlg-prompt-input" class="field" '+
+        'placeholder="'+esc(opts.placeholder || '')+'" '+
+        'value="'+esc(opts.defaultValue || '')+'" maxlength="200" autofocus>';
+    var okBtn = $('dlg-ok');
+    var cxBtn = $('dlg-cancel');
+    okBtn.textContent = opts.okLabel || 'OK';
+    cxBtn.textContent = opts.cancelLabel || 'Cancel';
+    cxBtn.hidden = false;
+    okBtn.style.background = ''; okBtn.style.color = '';
+    function cleanup(answer){
+      okBtn.onclick = null;
+      cxBtn.onclick = null;
+      $('modal-dialog').querySelector('.modal-backdrop').onclick = null;
+      closeModal('modal-dialog');
+      resolve(answer);
+    }
+    okBtn.onclick = function(){
+      var v = $('dlg-prompt-input').value || '';
+      cleanup(v);
+    };
+    cxBtn.onclick = function(){ cleanup(null); };
+    $('modal-dialog').querySelector('.modal-backdrop').onclick = function(){ cleanup(null); };
+    openModal('modal-dialog');
+    // iOS keyboard focus delay
+    setTimeout(function(){ var inp = $('dlg-prompt-input'); if(inp) inp.focus(); }, 80);
   });
 }
 var overlayEl=null;
@@ -2517,6 +2684,93 @@ async function submitAccessRequest(){
 // ============================================================
 //  TRIPS SCREEN
 // ============================================================
+// ============================================================
+//  PULL-TO-REFRESH (home / trips list)
+// ============================================================
+// Touch-driven refresh for the trip + club list. Only active while
+// the home tab is the visible surface (we look for #trips-content's
+// visibility). The handlers attach to document so they fire even when
+// the user starts the pull on a child element.
+(function setupPullToRefresh(){
+  var startY = 0;
+  var pullingFromTop = false;
+  var indicatorEl = null;
+  var THRESHOLD = 70;    // px past which release triggers refresh
+  var MAX_PULL  = 110;   // visual cap on how far the bar follows
+
+  function ensureIndicator(){
+    if(indicatorEl) return indicatorEl;
+    indicatorEl = document.createElement('div');
+    indicatorEl.className = 'ptr-bar';
+    indicatorEl.innerHTML = '<div class="ptr-spinner"></div>';
+    document.body.appendChild(indicatorEl);
+    return indicatorEl;
+  }
+
+  function onHomeAndAtTop(){
+    // The trips screen mounts #trips-content. We only enable PTR when
+    // that element exists AND the page is scrolled to the top — once
+    // the user scrolls down, a downward swipe is a normal scroll-up.
+    var el = document.getElementById('trips-content');
+    if(!el) return false;
+    // offsetParent === null means hidden (display:none ancestor).
+    if(el.offsetParent === null) return false;
+    return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+  }
+
+  document.addEventListener('touchstart', function(e){
+    if(!onHomeAndAtTop()) return;
+    if(!e.touches || !e.touches[0]) return;
+    startY = e.touches[0].clientY;
+    pullingFromTop = true;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e){
+    if(!pullingFromTop) return;
+    var y = e.touches[0].clientY;
+    var dy = y - startY;
+    // Dragging up cancels the gesture so normal scrolling resumes.
+    if(dy <= 0){ pullingFromTop = false; return; }
+    // Pulling down at the top of the home page: follow the finger
+    // with diminishing return, capped at MAX_PULL. The bar travels
+    // from -60 (hidden) toward 0 + a little overshoot for feel.
+    var bar = ensureIndicator();
+    var travel = Math.min(dy * 0.45, MAX_PULL) - 60;
+    bar.style.transform = 'translateY('+travel+'px)';
+    bar.style.transition = 'none';
+    // Prevent the page from rubber-banding while we're driving the
+    // bar — keeps the bar's motion smooth and predictable.
+    if(dy > 8 && e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', function(e){
+    if(!pullingFromTop) return;
+    pullingFromTop = false;
+    var endY = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : startY;
+    var dy = endY - startY;
+    var bar = ensureIndicator();
+    bar.style.transition = '';
+    if(dy >= THRESHOLD){
+      // Trigger refresh. Park the bar mid-pull while loadTrips runs
+      // so the spinner is visible; snap back when it resolves.
+      bar.style.transform = 'translateY(12px)';
+      bar.classList.add('ptr-active');
+      Promise.resolve().then(loadTrips).catch(function(){})
+        .then(function(){
+          setTimeout(function(){
+            bar.style.transform = 'translateY(-60px)';
+            // Remove the spinning class after the bar is fully hidden
+            // so the animation doesn't keep running in the background.
+            setTimeout(function(){ bar.classList.remove('ptr-active'); }, 250);
+          }, 250);
+        });
+    } else {
+      // Didn't pull far enough → snap back.
+      bar.style.transform = 'translateY(-60px)';
+    }
+  }, { passive: true });
+})();
+
 async function loadTrips(){
   $('trips-content').innerHTML='<div class="center-spin"><div class="spinner"></div></div>';
   try{
@@ -3436,6 +3690,16 @@ function _renderClubDashboardMember(d, t, el, opts){
             '<span style="font-size:13px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
           '</div>'+
         '</div>'+
+        // Fines pending — separate kalem since dues + fines have
+        // different semantics. Hidden until backfill confirms a
+        // non-zero pending balance, mirroring the pattern above.
+        '<div id="member-fines-row" hidden style="margin-top:10px;cursor:pointer;text-align:right;">'+
+          '<div style="font-size:11px;font-weight:700;color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.5px;">Fines pending</div>'+
+          '<div style="font-size:18px;font-weight:800;margin-top:2px;color:#ff453a;display:inline-flex;align-items:center;justify-content:flex-end;">'+
+            '<span id="member-fines-value">—</span>'+
+            '<span style="font-size:13px;color:var(--c-text-3);margin-left:6px;font-weight:400;">›</span>'+
+          '</div>'+
+        '</div>'+
       '</div>'
     : '';
 
@@ -3706,12 +3970,18 @@ function _renderClubDashboardMember(d, t, el, opts){
   // actor is whoever paid; for expense the actor is the payer.
   var personalEvents = (d.recent || []).filter(function(ev){
     // Governance audits stay out of the member surface — they're not
-    // personal finance. But transaction edit/delete audits ARE
-    // personally relevant when the target is me: we render them as a
-    // pip or a ghost row alongside the money flow.
+    // personal finance. But certain audit types ARE personally
+    // relevant when the target is the caller:
+    //   - transaction_edited / _deleted: pip or ghost overlay
+    //   - fine_issued / fine_paid / fine_cancelled: standalone row
+    //   - reimbursement_issued: standalone row
     if(ev.kind === 'audit'){
-      if((ev.action === 'transaction_edited' || ev.action === 'transaction_deleted')
-         && meName && ev.target_name === meName){
+      var personalActions = {
+        transaction_edited: 1, transaction_deleted: 1,
+        fine_issued: 1, fine_paid: 1, fine_cancelled: 1,
+        reimbursement_issued: 1
+      };
+      if(personalActions[ev.action] && meName && ev.target_name === meName){
         return true;
       }
       return false;
@@ -3749,6 +4019,27 @@ function _renderClubDashboardMember(d, t, el, opts){
           _ghost:      true
         };
       }
+      // Fine + reimbursement audits become standalone "audit_event"
+      // rows that render with the natural-language label from
+      // _auditLabel below. Members see them on their own dashboard,
+      // sorted into the same timeline as money rows.
+      if(ev.kind === 'audit' && (
+            ev.action === 'fine_issued'    ||
+            ev.action === 'fine_paid'      ||
+            ev.action === 'fine_cancelled' ||
+            ev.action === 'reimbursement_issued')){
+        var pa = ev.payload || {};
+        return {
+          kind:        'audit_event',
+          action:      ev.action,
+          at:          ev.at,
+          actor:       ev.actor,
+          target_name: ev.target_name,
+          amount:      Number(pa.amount || 0),
+          description: pa.description || '',
+          _audit:      ev
+        };
+      }
       return ev;
     });
 
@@ -3764,7 +4055,10 @@ function _renderClubDashboardMember(d, t, el, opts){
         && r.initiated_by_me === true
         && String(r.trip_id) === String(t.trip_id)
         && (r.request_type === 'dues_payment_claim'
-            || r.request_type === 'entry_fee_payment_claim');
+            || r.request_type === 'entry_fee_payment_claim'
+            || r.request_type === 'reimbursement_request'
+            || r.request_type === 'expense_submission'
+            || r.request_type === 'fine_payment_claim');
   }).map(function(r){
     return {
       kind:      'pending_claim',
@@ -3795,17 +4089,21 @@ function _renderClubDashboardMember(d, t, el, opts){
       var isEntry = ev.request_type === 'entry_fee_payment_claim';
       var isReimb = ev.request_type === 'reimbursement_request';
       var isExpSub = ev.request_type === 'expense_submission';
+      var isFine = ev.request_type === 'fine_payment_claim';
       if(isReimb){
         lbl = 'Reimbursement request';
-        color = '#30d158';   // green — pool will owe you less / pay you
+        color = '#30d158';
         sign = '+';
       } else if(isExpSub){
-        // Note packs "category|description"; show description.
         var raw = ev.note || '';
         var sep = raw.indexOf('|');
         lbl = sep > -1 ? raw.slice(sep+1) : (raw || 'Submitted expense');
         color = '#ff453a';
         sign = '-';
+      } else if(isFine){
+        lbl = 'Fine payment';
+        color = '#ff9f0a';
+        sign = '+';
       } else {
         lbl = isEntry
           ? 'Payment for entry fee'
@@ -3818,6 +4116,23 @@ function _renderClubDashboardMember(d, t, el, opts){
         'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
         'color:#ff9f0a;margin-left:6px;text-transform:uppercase;letter-spacing:0.4px;">'+
         'Pending</span>';
+    } else if(ev.kind === 'audit_event'){
+      // Standalone audit row — fine_issued, fine_paid, fine_cancelled,
+      // reimbursement_issued. Label comes from _auditLabel which
+      // produces the same natural-language string used in the admin
+      // feed ("Fatih issued a $50.00 fine to Martin for ...").
+      lbl = _auditLabel(ev._audit);
+      if(ev.action === 'fine_issued'){
+        sign = '-'; color = '#ff9f0a';
+      } else if(ev.action === 'fine_paid'){
+        sign = '+'; color = '#30d158';
+      } else if(ev.action === 'fine_cancelled'){
+        sign = '';  color = 'var(--c-text-3)';
+      } else if(ev.action === 'reimbursement_issued'){
+        sign = '+'; color = '#30d158';
+      } else {
+        sign = '';  color = 'var(--c-text-2)';
+      }
     } else if(ev.kind === 'expense'){
       sign = '-'; color = '#ff453a';
       lbl = ev.description || 'Expense';
@@ -3984,11 +4299,13 @@ function _renderYearRingSvg(months, size, thickness, gapDeg, opts){
     var endDeg   = -90 + ((i+1) * segDeg) - (gapDeg/2);
     var isPulse = !!(opts.pulsePeriod && m.period === opts.pulsePeriod);
     // Selected segment: matches the admin club ring pattern — give it
-    // a thicker stroke so the highlight reads at a glance.
+    // a slight stroke bump so the highlight reads at a glance. Kept
+    // small so the segment doesn't bleed into its neighbours; visual
+    // emphasis comes mainly from the halo arc rendered below.
     var isSelected = !!(opts.selectedPeriod && m.period === opts.selectedPeriod);
     var strokeW = thickness;
-    if(isPulse)    strokeW = thickness + 6;
-    if(isSelected) strokeW = thickness + 8;
+    if(isPulse)    strokeW = thickness + 2;
+    if(isSelected) strokeW = thickness + 2;
     paths += _arcPath(cx, cy, r, startDeg, endDeg, color,
       strokeW, m.label || '',
       m.period, m.status, m.amount, m.paid_amount);
@@ -4078,7 +4395,7 @@ function _arcPath(cx, cy, r, startDeg, endDeg, color, thickness, label,
     extra += ' style="cursor:pointer;"';
   }
   return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
-         '" stroke-linecap="round" fill="none" opacity="'+opacity+'"'+extra+'>'+
+         '" stroke-linecap="butt" fill="none" opacity="'+opacity+'"'+extra+'>'+
          (label ? '<title>'+esc(label)+'</title>' : '') +
          '</path>';
 }
@@ -4397,6 +4714,24 @@ function _applyMemberNetBalanceToDom(nb){
       rowPow.hidden = true;
     }
   }
+  // Fines pending follows the same hidden-until-non-zero pattern. The
+  // net balance RPC now surfaces fines_owed; we show the breakdown
+  // modal when tapped so the member sees the line items.
+  var rowFn = document.getElementById('member-fines-row');
+  var valFn = document.getElementById('member-fines-value');
+  if(rowFn && valFn){
+    var finesOwed = Number(nb.fines_owed || 0);
+    if(finesOwed > 0.005){
+      valFn.textContent = money(finesOwed);
+      rowFn.hidden = false;
+      rowFn.onclick = function(e){
+        if(e && e.stopPropagation) e.stopPropagation();
+        openFinesBreakdownModal();
+      };
+    } else {
+      rowFn.hidden = true;
+    }
+  }
 }
 
 // Legacy entry point — Recent Activity rows and external callers
@@ -4441,8 +4776,7 @@ async function _loadAndRenderManageUnpaid(){
   if(!ctx || !t) return;
   var pendingDuesIds = {};
   var pendingEntryFee = false;
-  // Only members need the pending lookup. Admins record changes
-  // directly and don't generate their own claim rows.
+  var pendingFineIds = {};
   if(!ctx.canMgmt){
     try{
       var res = await sb.rpc('list_my_member_requests');
@@ -4455,15 +4789,32 @@ async function _loadAndRenderManageUnpaid(){
             pendingDuesIds[String(r.dues_id)] = true;
           } else if(r.request_type === 'entry_fee_payment_claim'){
             pendingEntryFee = true;
+          } else if(r.request_type === 'fine_payment_claim' && r.fine_id){
+            pendingFineIds[String(r.fine_id)] = true;
           }
         });
       }
-    }catch(err){ /* non-fatal — modal still works without the badge */ }
+    }catch(err){ /* non-fatal */ }
   }
+  // Always pull the caller's fines (member or admin viewing self).
+  // get_member_fines handles permissioning — admin can pass p_dir to
+  // view someone else; here we just want the current actor's set.
+  var finesList = [];
+  try{
+    var dirArg = (ctx.forMemberDir != null) ? ctx.forMemberDir : null;
+    var fr = await sb.rpc('get_member_fines',
+      { p_trip: t.trip_id, p_dir: dirArg });
+    if(!fr.error && fr.data && Array.isArray(fr.data.fines)){
+      finesList = fr.data.fines.filter(function(f){ return f.status === 'pending'; });
+    }
+  }catch(err){ /* non-fatal — modal still renders without fines */ }
+
   state.unpaidModalPending = {
     duesIds:   pendingDuesIds,
-    entryFee:  pendingEntryFee
+    entryFee:  pendingEntryFee,
+    fineIds:   pendingFineIds
   };
+  state.unpaidModalFines = finesList;
   _renderManageUnpaidBody();
 }
 
@@ -4474,13 +4825,14 @@ function _renderManageUnpaidBody(){
   var periods   = ctx.periods || [];
   var entryFee  = Number(ctx.entryFeeOwed) || 0;
   var canMgmt   = !!ctx.canMgmt;
-  var pending   = state.unpaidModalPending || { duesIds:{}, entryFee:false };
+  var pending   = state.unpaidModalPending || { duesIds:{}, entryFee:false, fineIds:{} };
+  var fines     = state.unpaidModalFines || [];
 
-  if(periods.length === 0 && entryFee <= 0){
+  if(periods.length === 0 && entryFee <= 0 && fines.length === 0){
     $('mu-body').innerHTML =
       '<div class="empty" style="padding:24px 6px;">'+
         '<div class="empty-title">Nothing to manage</div>'+
-        '<div class="empty-sub">All months are paid and entry fee is settled.</div>'+
+        '<div class="empty-sub">All months are paid, entry fee is settled, and no fines outstanding.</div>'+
       '</div>';
     return;
   }
@@ -4545,6 +4897,41 @@ function _renderManageUnpaidBody(){
       '</button>';
   }
 
+  // ---- Fines section ----------------------------------------------
+  // One row per pending fine. Description on top, date + carry badge
+  // below. Mark as PAID flow mirrors dues: admin records directly;
+  // member submits a claim that admin then approves.
+  if(fines.length > 0){
+    rows +=
+      '<div style="margin-top:14px;margin-bottom:6px;font-size:10.5px;font-weight:700;'+
+        'color:var(--c-text-3);text-transform:uppercase;letter-spacing:0.6px;">'+
+        'Fines</div>';
+    fines.forEach(function(f){
+      var isPending = !!pending.fineIds[String(f.id)];
+      var outstanding = Number(f.outstanding || f.amount) || 0;
+      var when = f.issued_at
+        ? new Date(f.issued_at).toLocaleDateString(undefined,
+            {month:'short', day:'numeric', year:'numeric'})
+        : '';
+      var carried = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+      rows +=
+        '<button type="button" data-mu-fine-id="'+esc(f.id)+'" '+
+          'data-mu-fine-amt="'+esc(String(outstanding))+'" '+
+          'data-mu-fine-desc="'+esc(f.description||'Fine')+'"'+
+          (isPending ? ' disabled' : '')+
+          ' style="'+_rowStyle(isPending)+'">'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:14px;font-weight:600;">'+esc(f.description||'Fine')+'</div>'+
+            '<div style="font-size:11px;color:#ff453a;margin-top:2px;font-weight:600;">'+
+              money(outstanding)+' owed'+
+              '<span style="color:var(--c-text-3);font-weight:400;margin-left:6px;">· '+esc(when)+esc(carried)+'</span>'+
+            '</div>'+
+          '</div>'+
+          _actionLabel(isPending)+
+        '</button>';
+    });
+  }
+
   $('mu-body').innerHTML = rows;
   _wireManageUnpaidRows();
 }
@@ -4584,7 +4971,7 @@ function _wireManageUnpaidRows(){
   // ---- Entry fee row click ----
   $('mu-body').querySelectorAll('[data-mu-entry-fee]').forEach(function(btn){
     if(btn.disabled) return;
-    btn.onclick = function(){
+    btn.onclick = async function(){
       if(btn.disabled) return;
       var tag = btn.dataset.muEntryTag;
       var spanEl = btn.querySelector('span');
@@ -4607,8 +4994,19 @@ function _wireManageUnpaidRows(){
           _refreshAfterUnpaidAction();
         });
       } else if(tag === 'claim-entry-fee'){
+        // Ask the member how they paid (same prompt shape as the
+        // dues + fines claim flows) so the admin sees the payment
+        // method when approving.
+        var efNote = await promptModal(
+          'How did you pay? (cash / zelle / venmo / paypal / other)',
+          { okLabel:'Submit claim' });
+        if(efNote === null){
+          btn.disabled = false;
+          if(spanEl) spanEl.textContent = origLabel;
+          return;
+        }
         sb.rpc('submit_entry_fee_payment_claim', {
-          p_trip: t.trip_id, p_amount: null, p_note: null
+          p_trip: t.trip_id, p_amount: null, p_note: efNote || null
         }).then(async function(res){
           btn.disabled = false;
           if(spanEl) spanEl.textContent = origLabel;
@@ -4617,9 +5015,6 @@ function _wireManageUnpaidRows(){
             return;
           }
           toast('Claim submitted — waiting for admin approval');
-          // Refresh memberRequests so the pending row appears under
-          // Recent Activity on the dashboard. The modal can stay open
-          // briefly so the user sees the toast.
           await refreshNotifs();
           closeModal('modal-manage-unpaid');
           _refreshAfterUnpaidAction();
@@ -4627,6 +5022,46 @@ function _wireManageUnpaidRows(){
       } else {
         btn.disabled = false;
         if(spanEl) spanEl.textContent = origLabel;
+      }
+    };
+  });
+
+  // ---- Fines rows ---------------------------------------------------
+  $('mu-body').querySelectorAll('[data-mu-fine-id]').forEach(function(btn){
+    if(btn.disabled) return;
+    btn.onclick = async function(){
+      var fid  = btn.dataset.muFineId;
+      var amt  = parseFloat(btn.dataset.muFineAmt) || 0;
+      var desc = btn.dataset.muFineDesc || 'Fine';
+      // Admin records the payment directly; member submits a claim
+      // and the admin confirms via the bell — same shape as dues.
+      if(canMgmt){
+        var ok = await alertModal(
+          'Mark "' + desc + '" (' + money(amt) + ') paid?',
+          { confirm:true, confirmLabel:'Mark paid' });
+        if(!ok) return;
+        try{
+          var r = await sb.rpc('mark_fine_paid',
+            { p_fine_id: fid, p_amount: null, p_note: null });
+          if(r.error) throw r.error;
+          toast('Fine marked paid');
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
+        }catch(err){ toast(err.message || 'Could not mark paid', true); }
+      } else {
+        var note = await promptModal(
+          'How did you pay? (cash / zelle / venmo / paypal / other)',
+          { okLabel:'Submit claim' });
+        if(note === null) return;
+        try{
+          var r = await sb.rpc('submit_fine_payment_claim',
+            { p_fine_id: fid, p_amount: amt, p_note: note || null });
+          if(r.error) throw r.error;
+          toast('Claim submitted — waiting for admin approval');
+          await refreshNotifs();
+          closeModal('modal-manage-unpaid');
+          _refreshAfterUnpaidAction();
+        }catch(err){ toast(err.message || 'Could not submit claim', true); }
       }
     };
   });
@@ -5365,6 +5800,30 @@ function _auditLabel(ev){
       var detail = parts.length ? ' (' + parts.join(' + ') + ')' : '';
       return actor + ' reimbursed ' + target + detail;
     }
+    case 'fine_issued': {
+      var famt = money(Number(payload.amount || 0));
+      var fdesc = payload.description ? ' for "'+payload.description+'"' : '';
+      return actor + ' issued a ' + famt + ' fine to ' + target + fdesc;
+    }
+    case 'fine_paid': {
+      var pamt = money(Number(payload.amount || 0));
+      var pdesc = payload.description ? ' ("'+payload.description+'")' : '';
+      return target + ' paid a ' + pamt + ' fine' + pdesc;
+    }
+    case 'fine_cancelled': {
+      var camt = money(Number(payload.amount || 0));
+      var cdesc = payload.description ? ' for "'+payload.description+'"' : '';
+      return actor + ' cancelled a ' + camt + ' fine on ' + target + cdesc;
+    }
+    case 'fine_edited': {
+      var oldA = Number(payload.old_amount || 0);
+      var newA = Number(payload.new_amount || 0);
+      if(Math.abs(oldA - newA) > 0.005){
+        return actor + ' edited a fine on ' + target + ' from ' +
+          money(oldA) + ' to ' + money(newA);
+      }
+      return actor + ' edited a fine on ' + target;
+    }
     default:
       return actor + ' performed ' + (ev.action || 'an action');
   }
@@ -5408,6 +5867,374 @@ function _renderEditedPip(audit){
 // =====================================================================
 
 // --- Member: Out of Pocket breakdown modal ---
+// =====================================================================
+//  FINES — issue (admin) + breakdown (member + admin)
+// =====================================================================
+
+// State holder for Issue Fine modal's selections so member checkbox
+// toggles and the amount-chip choice survive across renders.
+state.issueFine = state.issueFine || { selectedDirs: {}, amountMode: 50 };
+
+async function openIssueFineModal(){
+  state.issueFine = { selectedDirs: {}, amountMode: 50 };
+  $('if-desc').value = '';
+  $('if-amount-custom').value = '';
+  $('if-amount-custom').hidden = true;
+  $('if-msg').className = 'msg';
+  $('if-msg').textContent = '';
+  _ifSyncPresetChips();
+  _ifSyncMembersCount();
+  openModal('modal-issue-fine');
+
+  // state.trip.members is already loaded by get_trip; no extra RPC
+  // needed. We include the admin themselves — they may decide to
+  // fine everyone equally including themselves. Inactive members
+  // stay filtered out.
+  var members = ((state.trip && state.trip.members) || []).filter(function(m){
+    return !m.is_inactive;
+  });
+  if(members.length === 0){
+    $('if-members-list').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--c-text-3);font-size:12.5px;">No other members to fine.</div>';
+    return;
+  }
+  var html = '';
+  members.forEach(function(m){
+    var nm = ((m.first_name||'')+' '+(m.last_name||'')).trim() || m.email || '—';
+    html +=
+      '<label class="if-mem-row" data-if-dir="'+esc(m.directory_id)+'">'+
+        '<input type="checkbox" data-if-mem-cb="'+esc(m.directory_id)+'">'+
+        '<span class="if-mem-name">'+esc(nm)+'</span>'+
+      '</label>';
+  });
+  $('if-members-list').innerHTML = html;
+  // Wire checkboxes to selectedDirs. The <label> wrapping forwards
+  // taps on the row to the checkbox natively.
+  document.querySelectorAll('#if-members-list [data-if-mem-cb]').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      var dir = cb.dataset.ifMemCb;
+      if(cb.checked) state.issueFine.selectedDirs[dir] = true;
+      else delete state.issueFine.selectedDirs[dir];
+      _ifSyncMembersCount();
+    });
+  });
+}
+
+function _ifSyncMembersCount(){
+  var n = Object.keys(state.issueFine.selectedDirs).length;
+  $('if-members-count').textContent = n + ' selected';
+}
+
+function _ifSyncPresetChips(){
+  document.querySelectorAll('#if-amount-presets .if-amt-chip').forEach(function(b){
+    var v = b.dataset.amt;
+    var isActive = (v === 'custom')
+      ? (state.issueFine.amountMode === 'custom')
+      : (Number(v) === Number(state.issueFine.amountMode));
+    b.classList.toggle('active', isActive);
+  });
+  $('if-amount-custom').hidden = (state.issueFine.amountMode !== 'custom');
+}
+
+async function submitIssueFine(){
+  var desc = ($('if-desc').value || '').trim();
+  function setMsg(t){ $('if-msg').className='msg show err'; $('if-msg').textContent=t; }
+  if(!desc){ setMsg('Description is required.'); return; }
+  var dirs = Object.keys(state.issueFine.selectedDirs);
+  if(dirs.length === 0){ setMsg('Pick at least one member.'); return; }
+  var amount;
+  if(state.issueFine.amountMode === 'custom'){
+    amount = parseFloat($('if-amount-custom').value);
+    if(!(amount > 0)){ setMsg('Enter a valid custom amount.'); return; }
+  } else {
+    amount = Number(state.issueFine.amountMode);
+  }
+  var btn = $('if-submit');
+  btn.disabled = true; btn.textContent = 'Issuing…';
+  try{
+    var res = await sb.rpc('issue_club_fines', {
+      p_trip:        state.trip.trip_id,
+      p_dirs:        dirs,
+      p_amount:      amount,
+      p_description: desc,
+      p_category:    null
+    });
+    if(res.error) throw res.error;
+    var n = res.data || dirs.length;
+    closeModal('modal-issue-fine');
+    toast('Issued '+n+' fine'+(n===1?'':'s'));
+    await _fullRefresh();
+  }catch(err){ setMsg(err.message || 'Could not issue fines.'); }
+  btn.disabled = false; btn.textContent = 'Issue fine';
+}
+
+// --- Fines breakdown modal (member or admin viewing a member) -------
+// Admin-side: club-wide fines summary, grouped by member. Each
+// member's name shows their subtotal; their fines are listed
+// underneath with description, date, and outstanding amount. Admin
+// can mark paid or cancel from within this modal — the modal closes
+// and refreshes on either action.
+async function openClubFinesSummaryModal(){
+  openModal('modal-fines-breakdown');
+  $('fb-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var res = await sb.rpc('get_club_fines_summary',
+      { p_trip: state.trip.trip_id });
+    if(res.error) throw res.error;
+    var data = res.data || { members: [], total_pending: 0 };
+    var members = data.members || [];
+
+    var header =
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 14px;'+
+        'padding:10px 0;border-bottom:1px solid var(--c-border);font-size:13px;">'+
+        '<div style="color:var(--c-text-2);">Total pending</div>'+
+        '<div style="font-weight:800;text-align:right;color:#ff453a;">'+
+          money(data.total_pending||0)+'</div>'+
+      '</div>';
+
+    if(members.length === 0){
+      $('fb-body').innerHTML = header +
+        '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">All settled — no outstanding fines.</div>';
+      return;
+    }
+
+    var html = header;
+    members.forEach(function(m){
+      html +=
+        '<div style="margin-top:18px;display:flex;justify-content:space-between;'+
+          'align-items:baseline;padding:0 0 6px;border-bottom:1px solid var(--c-border);">'+
+          '<div style="font-size:14px;font-weight:700;color:var(--c-text);">'+esc(m.display_name||'')+'</div>'+
+          '<div style="font-size:13px;font-weight:700;color:#ff453a;">'+money(m.member_total||0)+'</div>'+
+        '</div>';
+      (m.fines || []).forEach(function(f){
+        var when = f.issued_at ? new Date(f.issued_at).toLocaleDateString(undefined,
+          {month:'short', day:'numeric', year:'numeric'}) : '';
+        var carriedNote = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+        var pip = f.is_carried
+          ? '<span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+              'padding:1px 6px;border-radius:6px;background:rgba(255,159,10,0.18);'+
+              'color:#ff9f0a;margin-left:4px;letter-spacing:0.4px;">CARRIED OVER</span>'
+          : '';
+        // Trash-can icon for the delete button — matches the icon
+        // style used elsewhere in the app (Edit Transaction row).
+        var trashSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '+
+          'stroke="currentColor" stroke-width="2" stroke-linecap="round" '+
+          'stroke-linejoin="round" style="display:block;">'+
+          '<polyline points="3 6 5 6 21 6"/>'+
+          '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'+
+          '<path d="M10 11v6"/><path d="M14 11v6"/>'+
+          '<path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
+        var pencilSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '+
+          'stroke="currentColor" stroke-width="2" stroke-linecap="round" '+
+          'stroke-linejoin="round" style="display:block;">'+
+          '<path d="M12 20h9"/>'+
+          '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+        html +=
+          '<div style="padding:10px 0;border-bottom:0.5px solid var(--c-border);">'+
+            // Description sola, amount sağa
+            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">'+
+              '<div style="min-width:0;flex:1;">'+
+                '<div style="font-size:13px;color:var(--c-text);font-weight:600;">'+
+                  esc(f.description||'Fine')+pip+
+                '</div>'+
+                '<div style="font-size:11px;color:var(--c-text-3);margin-top:2px;">'+
+                  esc(when)+esc(carriedNote)+
+                '</div>'+
+              '</div>'+
+              '<div style="font-size:14px;font-weight:700;color:#ff453a;white-space:nowrap;">'+
+                money(f.outstanding||f.amount||0)+'</div>'+
+            '</div>'+
+            // Alt satır: Edit (kalem) — Delete (çöp kovası) — Mark paid.
+            // Buton tarzları diğer modallerle aynı.
+            '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;align-items:center;">'+
+              '<button class="btn btn-secondary" '+
+                'style="width:auto;flex-shrink:0;min-height:auto;padding:6px 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:5px;" '+
+                'data-fb-edit="'+esc(f.id)+'" '+
+                'data-fb-edit-amt="'+esc(String(f.amount||0))+'" '+
+                'data-fb-edit-desc="'+esc(f.description||'')+'">'+
+                pencilSvg + '<span>Edit</span></button>'+
+              '<button class="btn btn-cancel" '+
+                'style="width:auto;flex-shrink:0;min-height:auto;padding:6px 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:5px;" '+
+                'data-fb-cancel="'+esc(f.id)+'" title="Delete fine">'+
+                trashSvg + '<span>Delete</span></button>'+
+              '<button class="btn btn-primary" '+
+                'style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
+                'data-fb-mark-paid="'+esc(f.id)+'">Mark paid</button>'+
+            '</div>'+
+          '</div>';
+      });
+    });
+    $('fb-body').innerHTML = html;
+
+    // Same button wiring as the single-member view.
+    document.querySelectorAll('#fb-body [data-fb-mark-paid]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbMarkPaid;
+        if(!await alertModal('Mark this fine paid?', { confirm:true, confirmLabel:'Mark paid' })) return;
+        try{
+          var r = await sb.rpc('mark_fine_paid', { p_fine_id: fid, p_amount: null, p_note: null });
+          if(r.error) throw r.error;
+          toast('Fine marked paid');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not mark paid.'); }
+      };
+    });
+    document.querySelectorAll('#fb-body [data-fb-cancel]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbCancel;
+        if(!await alertModal('Delete this fine? This cannot be undone.',
+            { confirm:true, confirmLabel:'Delete', danger:true })) return;
+        try{
+          var r = await sb.rpc('cancel_fine', { p_fine_id: fid, p_reason: 'Deleted by admin' });
+          if(r.error) throw r.error;
+          toast('Fine deleted');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not delete.'); }
+      };
+    });
+    document.querySelectorAll('#fb-body [data-fb-edit]').forEach(function(b){
+      b.onclick = function(){
+        state.editFineCtx = {
+          id:   b.dataset.fbEdit,
+          amt:  Number(b.dataset.fbEditAmt || 0),
+          desc: b.dataset.fbEditDesc || ''
+        };
+        $('ef-desc').value = state.editFineCtx.desc;
+        $('ef-amount').value = state.editFineCtx.amt > 0 ? state.editFineCtx.amt.toFixed(2) : '';
+        $('ef-msg').className = 'msg';
+        $('ef-msg').textContent = '';
+        openModal('modal-edit-fine');
+      };
+    });
+  }catch(err){
+    $('fb-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
+async function openFinesBreakdownModal(forDir){
+  openModal('modal-fines-breakdown');
+  $('fb-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
+  try{
+    var dir = forDir
+      || (state.viewingMember && state.viewingMember.directory_id)
+      || (state.trip && state.trip.my_directory_id);
+    var res = await sb.rpc('get_member_fines',
+      { p_trip: state.trip.trip_id, p_dir: dir });
+    if(res.error) throw res.error;
+    var data = res.data || { fines: [], total_pending: 0 };
+    var fines = data.fines || [];
+    // Determine if the caller can take admin actions (Mark Paid /
+    // Cancel) so we render those buttons selectively.
+    var isAdminEff = !!(state.trip && (state.trip.is_admin || state.is_treasurer
+                                       || state.trip.is_global_admin));
+
+    var header =
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 14px;'+
+        'padding:10px 0;border-bottom:1px solid var(--c-border);font-size:13px;">'+
+        '<div style="color:var(--c-text-2);">Total pending</div>'+
+        '<div style="font-weight:800;text-align:right;color:#ff453a;">'+
+          money(data.total_pending||0)+'</div>'+
+      '</div>';
+
+    if(fines.length === 0){
+      $('fb-body').innerHTML = header +
+        '<div style="padding:24px 0;text-align:center;color:var(--c-text-3);font-size:12.5px;">No fines on record.</div>';
+      return;
+    }
+
+    var rows = '';
+    fines.forEach(function(f){
+      var statusColor, statusBg, statusLabel;
+      if(f.status === 'paid'){
+        statusColor = '#30d158'; statusBg = 'rgba(48,209,88,0.18)';
+        statusLabel = 'PAID';
+      } else if(f.status === 'cancelled'){
+        statusColor = 'var(--c-text-3)'; statusBg = 'rgba(120,120,128,0.18)';
+        statusLabel = 'CANCELLED';
+      } else if(f.is_carried){
+        statusColor = '#ff9f0a'; statusBg = 'rgba(255,159,10,0.18)';
+        statusLabel = 'CARRIED OVER';
+      } else {
+        statusColor = '#ff9f0a'; statusBg = 'rgba(255,159,10,0.18)';
+        statusLabel = 'PENDING';
+      }
+      var when = f.issued_at ? new Date(f.issued_at).toLocaleDateString(undefined,
+        {month:'short', day:'numeric', year:'numeric'}) : '';
+      var carriedNote = f.is_carried ? ' · from '+esc(f.issued_period_label||'') : '';
+      var amtCol = (f.status === 'paid') ? '#30d158'
+                  : (f.status === 'cancelled') ? 'var(--c-text-3)' : '#ff453a';
+      var amtPrefix = (f.status === 'cancelled') ? '' : '−';
+      rows +=
+        '<div style="padding:12px 0;border-bottom:0.5px solid var(--c-border);">'+
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'+
+            '<div style="min-width:0;flex:1;">'+
+              '<div style="font-size:13.5px;color:var(--c-text);font-weight:600;">'+
+                esc(f.description||'Fine')+
+                ' <span style="display:inline-block;font-size:9.5px;font-weight:800;'+
+                  'padding:1px 6px;border-radius:6px;background:'+statusBg+';'+
+                  'color:'+statusColor+';margin-left:4px;letter-spacing:0.4px;">'+
+                  statusLabel+'</span>'+
+              '</div>'+
+              '<div style="font-size:11px;color:var(--c-text-3);margin-top:3px;">'+
+                esc(when)+esc(carriedNote)+
+              '</div>'+
+            '</div>'+
+            '<div style="font-size:14px;font-weight:700;color:'+amtCol+';white-space:nowrap;">'+
+              amtPrefix+money(f.amount||0)+'</div>'+
+          '</div>'+
+          (isAdminEff && f.status === 'pending' ?
+            '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">'+
+              '<button class="btn btn-cancel" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
+                'data-fb-cancel="'+esc(f.id)+'">Cancel</button>'+
+              '<button class="btn btn-primary" style="width:auto;flex-shrink:0;min-height:auto;padding:6px 12px;font-size:11.5px;" '+
+                'data-fb-mark-paid="'+esc(f.id)+'" data-fb-amount="'+esc(String(f.outstanding||f.amount))+'">Mark paid</button>'+
+            '</div>' : '') +
+        '</div>';
+    });
+    $('fb-body').innerHTML = header + rows;
+
+    // Wire admin action buttons. The member side has no buttons —
+    // they pay fines through the "Dues this month" card's Manage
+    // Unpaid flow, keeping one consistent payment path for all dues
+    // / entry-fee / fine obligations.
+    document.querySelectorAll('#fb-body [data-fb-mark-paid]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbMarkPaid;
+        if(!await alertModal('Mark this fine paid?', { confirm:true, confirmLabel:'Mark paid' })) return;
+        try{
+          var r = await sb.rpc('mark_fine_paid', { p_fine_id: fid, p_amount: null, p_note: null });
+          if(r.error) throw r.error;
+          toast('Fine marked paid');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not mark paid.'); }
+      };
+    });
+    document.querySelectorAll('#fb-body [data-fb-cancel]').forEach(function(b){
+      b.onclick = async function(){
+        var fid = b.dataset.fbCancel;
+        var reason = await promptModal('Cancel this fine — reason (optional):', { okLabel:'Cancel fine' });
+        if(reason === null) return; // user dismissed
+        try{
+          var r = await sb.rpc('cancel_fine', { p_fine_id: fid, p_reason: reason || null });
+          if(r.error) throw r.error;
+          toast('Fine cancelled');
+          closeModal('modal-fines-breakdown');
+          await _fullRefresh();
+        }catch(err){ alertModal(err.message || 'Could not cancel.'); }
+      };
+    });
+  }catch(err){
+    $('fb-body').innerHTML =
+      '<div class="empty"><div class="empty-title">Could not load</div>'+
+      '<div class="empty-sub">'+esc(err.message||'')+'</div></div>';
+  }
+}
+
 async function openMemberOutOfPocketModal(){
   openModal('modal-out-of-pocket');
   $('oop-body').innerHTML = '<div class="center-spin"><div class="spinner"></div></div>';
@@ -6041,7 +6868,7 @@ function _renderClubDashboardAdmin(d, t, el, opts){
   // Centre disc inset depends on ring size so the inner circle keeps
   // a consistent ratio (stroke + padding stays ~constant).
   var discInset = (ringSize >= 240) ? 46 : 38;
-  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 5,
+  var ringSvg = _renderClubYearRingSvg(months, ringSize, ringStroke, 4,
     adminSelected, d.current_period, discInset);
   var clubName = t.name || 'Club';
   // Truncate club names so the centre disc text always fits.
@@ -6080,6 +6907,9 @@ function _renderClubDashboardAdmin(d, t, el, opts){
       _statRow('Pool Owes Members', '—',
                { id:'ss-pool-owes', clickable:true,
                  hint:'reimbursements pending' }) +
+      _statRow('Total Fines Pending', '—',
+               { id:'ss-fines-total', clickable:true,
+                 hint:'fines outstanding' }) +
       _statRow('Over Dues '+esc((d.year||'')+''),
                money(d.over_dues_collected||0)+' / '+money(d.over_dues_billed||0),
                { hint:'collected of billed' }) +
@@ -6329,6 +7159,30 @@ function _renderClubDashboardAdmin(d, t, el, opts){
     });
   }
 
+  // Total Fines Pending — same async pattern as Pool Owes Members.
+  // Hidden when no member has outstanding fines.
+  var finesEl = el.querySelector('#ss-fines-total');
+  if(finesEl){
+    sb.rpc('get_club_fines_summary',
+      { p_trip: state.trip.trip_id }).then(function(res){
+      if(res.error || !res.data) return;
+      var total = Number(res.data.total_pending || 0);
+      var valueDiv = finesEl.querySelector('div:nth-child(2)');
+      if(total > 0.005){
+        if(valueDiv){
+          valueDiv.innerHTML =
+            money(total) +
+            '<span style="font-size:14px;color:var(--c-text-3);margin-left:6px;">›</span>';
+          valueDiv.style.color = '#ff453a';
+        }
+        finesEl.onclick = openClubFinesSummaryModal;
+        finesEl.style.display = '';
+      } else {
+        finesEl.style.display = 'none';
+      }
+    });
+  }
+
   // -----  Wire interactions  -----
   // 1. Ring segments: select a month.
   el.querySelectorAll('[data-seg-period]').forEach(function(seg){
@@ -6448,7 +7302,7 @@ function _renderClubYearRingSvg(months, size, thickness, gapDeg,
     // Main segment. Selected one is noticeably thicker so even without
     // the halo it stands out from the rest of the ring.
     paths += _clubArcPath(cx, cy, r, startDeg, endDeg, color,
-      isSelected ? thickness + 6 : thickness,
+      isSelected ? thickness + 2 : thickness,
       m.label_full || '', m.period, m.status, isSelected);
     // Halo overlay for the selected segment: a second concentric arc
     // sitting inside the ring, in the accent colour, with a
@@ -6530,7 +7384,7 @@ function _clubArcPath(cx, cy, r, startDeg, endDeg, color, thickness,
   var opacity = (color === '#3a3a3c' && !isSelected) ? 0.30 : 1;
   var d = 'M '+p1.x+' '+p1.y+' A '+r+' '+r+' 0 '+largeArc+' 1 '+p2.x+' '+p2.y;
   return '<path d="'+d+'" stroke="'+color+'" stroke-width="'+thickness+
-         '" stroke-linecap="round" fill="none" opacity="'+opacity+'" '+
+         '" stroke-linecap="butt" fill="none" opacity="'+opacity+'" '+
          'data-seg-period="'+esc(period||'')+'" '+
          'data-seg-status="'+esc(status||'')+'" '+
          (isSelected ? 'filter="drop-shadow(0 0 4px '+color+'55)"' : '') + '>'+
@@ -11170,6 +12024,7 @@ function renderNotifs(){
     var isEntryFeeClaim = (r.request_type === 'entry_fee_payment_claim');
     var isReimburse = (r.request_type === 'reimbursement_request');
     var isExpenseSubmit = (r.request_type === 'expense_submission');
+    var isFineClaim = (r.request_type === 'fine_payment_claim');
     var headTxt;
     if(isLeave){
       headTxt = isRejected ? 'Leave request declined'
@@ -11195,6 +12050,10 @@ function renderNotifs(){
       headTxt = isRejected ? 'Expense submission declined'
               : isApproved ? 'Expense submission approved'
               : 'Expense submission';
+    }else if(isFineClaim){
+      headTxt = isRejected ? 'Fine payment claim declined'
+              : isApproved ? 'Fine payment claim approved'
+              : 'Fine payment claim';
     }
     // For reimbursement requests on the admin side, tagging the card
     // with a data-* attribute lets us wire it to open the Pool Owes
@@ -11311,6 +12170,23 @@ function renderNotifs(){
              ' submitted '+esc(eDesc||'an expense')+
              (eAmt?' ('+eAmt+')':'')+
              (eCat ? ' · '+esc(eCat) : '')+'</div>';
+      }
+    }else if(isFineClaim){
+      var fcAmt = (r.requested_amount != null) ? money(Number(r.requested_amount)||0) : '';
+      if(isApproved){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' fine payment was confirmed'+(fcAmt?' ('+fcAmt+')':'')+'</div>';
+      } else if(isRejected){
+        h += '<div class="notif-title">'+(r.initiated_by_me ? 'Your' : esc(r.target_name||'')+'\'s')+
+             ' fine payment claim was declined</div>';
+      } else if(r.initiated_by_me){
+        h += '<div class="notif-title">Waiting for admin to confirm your '+fcAmt+' fine payment</div>';
+      } else {
+        h += '<div class="notif-title">'+esc(r.target_name||r.initiator_name||'A member')+
+             ' is claiming a '+fcAmt+' fine payment</div>';
+      }
+      if(r.note){
+        h += '<div class="notif-sub" style="margin-top:6px;padding:8px 10px;background:var(--c-bg);border-radius:8px;font-style:italic;">'+esc(r.note)+'</div>';
       }
     }
     if(isRejected && r.rejection_reason){
@@ -11915,6 +12791,54 @@ $('mr-offset').addEventListener('input',  _mrRecomputeCash);
 $('mr-offset').addEventListener('change', _mrRecomputeCash);
 $('se-cancel').onclick = function(){ closeModal('modal-submit-expense'); };
 $('se-submit').onclick = submitMemberExpense;
+
+// ----- Fines modals -----
+$('if-cancel').onclick = function(){ closeModal('modal-issue-fine'); };
+$('if-submit').onclick = submitIssueFine;
+$('fb-close').onclick  = function(){ closeModal('modal-fines-breakdown'); };
+$('ef-cancel').onclick = function(){ closeModal('modal-edit-fine'); };
+$('ef-save').onclick = async function(){
+  var ctx = state.editFineCtx || {};
+  var desc = ($('ef-desc').value || '').trim();
+  var amt  = parseFloat($('ef-amount').value);
+  function setMsg(t){ $('ef-msg').className='msg show err'; $('ef-msg').textContent=t; }
+  if(!desc){ setMsg('Description is required.'); return; }
+  if(!(amt > 0)){ setMsg('Enter a valid amount.'); return; }
+  var btn = $('ef-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    var r = await sb.rpc('update_club_fine',
+      { p_fine_id: ctx.id, p_amount: amt, p_description: desc });
+    if(r.error) throw r.error;
+    closeModal('modal-edit-fine');
+    closeModal('modal-fines-breakdown');
+    toast('Fine updated');
+    await _fullRefresh();
+  }catch(err){ setMsg(err.message || 'Could not save.'); }
+  btn.disabled = false; btn.textContent = 'Save';
+};
+$('if-members-all').onclick = function(){
+  // Toggle: if all visible members are selected, unselect; otherwise
+  // select all visible.
+  var cbs = document.querySelectorAll('#if-members-list [data-if-mem-cb]');
+  var allOn = cbs.length > 0 && Array.prototype.every.call(cbs, function(c){ return c.checked; });
+  cbs.forEach(function(cb){
+    cb.checked = !allOn;
+    var dir = cb.dataset.ifMemCb;
+    if(cb.checked) state.issueFine.selectedDirs[dir] = true;
+    else delete state.issueFine.selectedDirs[dir];
+  });
+  _ifSyncMembersCount();
+  $('if-members-all').textContent = allOn ? 'Select all' : 'Unselect all';
+};
+// Amount preset chip click: switch between $50 and Custom.
+document.querySelectorAll('#if-amount-presets .if-amt-chip').forEach(function(b){
+  b.addEventListener('click', function(){
+    var v = b.dataset.amt;
+    state.issueFine.amountMode = (v === 'custom') ? 'custom' : Number(v);
+    _ifSyncPresetChips();
+  });
+});
 // Member breakdown modal.
 $('mb-close').onclick  = function(){ closeModal('modal-member-breakdown'); };
 $('mb-year').onchange  = function(){ _loadMemberBreakdown(parseInt($('mb-year').value, 10)); };
@@ -11934,6 +12858,10 @@ $('cex-paid-by').onchange = _onClubExpensePaidByChange;
 $('lac-cancel').onclick      = function(){ closeModal('modal-ledger-add-chooser'); };
 $('lac-pick-expense').onclick = openClubAddExpense;
 $('lac-pick-pool-in').onclick = openClubPoolIn;
+$('lac-pick-fine').onclick    = function(){
+  closeModal('modal-ledger-add-chooser');
+  setTimeout(openIssueFineModal, 180);
+};
 
 // Pool In modal: category chip selection + submit/cancel.
 $('pi-cancel').onclick = function(){ closeModal('modal-pool-in'); };
