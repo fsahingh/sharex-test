@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Shared">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0a84ff">
-<meta name="app-version" content="V2-CLUB.66">
+<meta name="app-version" content="V2-CLUB.67">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Shared Expenses</title>
 <!-- PWA manifest (inline as a data URL so we don't need a second file
@@ -2022,7 +2022,7 @@
 // ============================================================
 //  CONFIG
 // ============================================================
-var APP_VERSION = 'V2-CLUB.66';
+var APP_VERSION = 'V2-CLUB.67';
 
 // ----------------------------------------------------------------
 //  Auto-refresh on new deploy
@@ -4650,18 +4650,17 @@ async function _fullRefresh(){
   state.settlementLoadedFor    = null;
   state.memberSpentCache       = {};
   state.memberNetBalanceCache  = {};
-  // Re-pull the bell state in parallel with the surface re-render so
-  // the bell badge reflects the new world after the action lands.
-  var notifsPromise;
-  try{ notifsPromise = refreshNotifs(); }catch(err){ notifsPromise = Promise.resolve(); }
+  // Pull notifs FIRST and wait for them. The dashboard's Recent
+  // Activity folds pending member-requests into the feed, so running
+  // the re-render with a stale state.memberRequests would silently
+  // miss a brand-new request the user just submitted.
+  try{ await refreshNotifs(); }catch(e){}
   if(state.viewingMember && state.viewingMember.directory_id){
     try{ await openMemberProfileView(state.viewingMember.directory_id); }catch(e){}
   } else {
     try{ await renderActiveTab(); }catch(e){}
   }
-  try{ await notifsPromise; }catch(e){}
-  // Notif body uses state.notifs / state.memberRequests directly;
-  // re-render it explicitly so a bell that's open updates too.
+  // Bell DOM re-render so it matches the new state too.
   try{ renderNotifs(); }catch(e){}
 }
 
